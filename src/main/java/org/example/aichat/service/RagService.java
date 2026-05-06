@@ -11,4 +11,14 @@ public interface RagService {
      * 重新加载知识库文件并重建分块索引。
      */
     int reload();
+    
+    /**
+     * 将记忆存入指定角色和用户的长期记忆流中
+     */
+    void addLongTermMemory(Integer userId, Integer roleId, String summaryText);
+
+    /**
+     * 针对特定角色、特定用户搜索相关记忆
+     */
+    String searchLongTermMemoryContext(Integer userId, Integer roleId, String query, int topK);
 }

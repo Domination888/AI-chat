@@ -272,4 +272,50 @@ public class RagServiceImpl implements RagService {
 
     private record ScoredChunk(RagChunk chunk, float score) {
     }
+
+    @Override
+    public void addLongTermMemory(Integer userId, Integer roleId, String summaryText) {
+        if (!StringUtils.hasText(summaryText)) return;
+        try {
+            Embedding embedding = embeddingModel.embed(summaryText).content();
+            Set<String> terms = extractTerms(summaryText);
+            RagChunk chunk = new RagChunk("memory", 0, summaryText, terms, embedding.vector());
+            
+            String redisKey = "rag:memory:" + userId + ":" + roleId;
+            String chunkJson = objectMapper.writeValueAsString(chunk);
+            stringRedisTemplate.opsForHash().put(redisKey, String.valueOf(System.currentTimeMillis()), chunkJson);
+            log.info("成功为 User={} Role={} 存入长期记忆: {}", userId, roleId, summaryText);
+        } catch (Exception e) {
+            log.error("保存长期记忆到Redis失败", e);
+        }
+    }
+
+    @Override
+    public String searchLongTermMemoryContext(Integer userId, Integer roleId, String query, int topK) {
+        if (!StringUtils.hasText(query)) return "";
+        try {
+            String redisKey = "rag:memory:" + userId + ":" + roleId;
+            Map<Object, Object> entries = stringRedisTemplate.opsForHash().entries(redisKey);
+            if (entries.isEmpty()) return "";
+
+            List<RagChunk> memoryChunks = new ArrayList<>();
+            for (Object value : entries.values()) {
+                RagChunk chunk = objectMapper.readValue((String) value, RagChunk.class);
+                memoryChunks.add(chunk);
+            }
+
+            Embedding queryEmb = embeddingModel.embed(query).content();
+            memoryChunks.sort(Comparator.comparingDouble((RagChunk c) -> 
+                    -cosineSimilarity(queryEmb.vector(), c.embedding())));
+
+            StringBuilder context = new StringBuilder();
+            for (int i = 0; i < Math.min(topK, memoryChunks.size()); i++) {
+                context.append("- ").append(memoryChunks.get(i).text()).append("\n");
+            }
+            return context.toString();
+        } catch (Exception e) {
+            log.error("检索长期记忆失败", e);
+            return "";
+        }
+    }
 }

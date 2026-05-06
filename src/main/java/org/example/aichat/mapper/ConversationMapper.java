@@ -13,7 +13,7 @@ import java.util.List;
 @Mapper
 public interface ConversationMapper {
 
-    @Insert("INSERT IGNORE INTO conversation(id, user_id, title) VALUES(#{id}, #{userId}, #{title})")
+    @Insert("INSERT IGNORE INTO conversation(id, user_id, role_id, title) VALUES(#{id}, #{userId}, #{roleId}, #{title})")
     void insertOrUpdate(Conversation conversation);
 
     @Select("SELECT * FROM conversation WHERE user_id = #{userId} ORDER BY created_at DESC")

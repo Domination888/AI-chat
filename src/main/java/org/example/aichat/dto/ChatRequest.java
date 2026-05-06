@@ -17,6 +17,9 @@ public class ChatRequest {
 
     // 可为空（纯文本时）
     private List<String> images;   // base64字符串数组
+    
+    // 角色 ID
+    private Integer roleId;
 
     // 是否流式
     private Boolean stream = true;

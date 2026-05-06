@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 public class Conversation {
     private String id;
     private Integer userId;
+    private Integer roleId;
     private String title;
     private LocalDateTime createdAt;
 }

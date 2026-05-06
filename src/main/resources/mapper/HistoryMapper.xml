@@ -47,4 +47,8 @@
         WHERE conversation_id = #{conversationId}
     </delete>
 
+    <delete id="deleteById">
+        DELETE FROM history WHERE id = #{id}
+    </delete>
+
 </mapper>

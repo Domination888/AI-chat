@@ -25,6 +25,7 @@ import org.example.aichat.service.PromptService;
 import org.example.aichat.service.ChatService;
 import org.example.aichat.service.MemoryService;
 import org.example.aichat.service.RagService;
+import org.example.aichat.service.RoleCardService;
 import org.example.aichat.mapper.ConversationMapper;
 import org.example.aichat.dto.Conversation;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -62,6 +63,10 @@ public class ChatServiceImpl implements ChatService {
     private McpClient localMcpClient;
     @Resource
     private ConversationMapper conversationMapper;
+    @Resource
+    private org.example.aichat.mapper.RoleCardMapper roleCardMapper;
+    @Resource
+    private RoleCardService roleCardService;
 
 
     /** ChatMemory 窗口大小：保留最近的消息条数 */
@@ -77,12 +82,15 @@ public class ChatServiceImpl implements ChatService {
         }
 
         String conversationId = request.getConversationId();
+        Integer roleId = request.getRoleId() != null ? request.getRoleId() : 1; 
+        Integer userId = 0;
         // 0. 保存或更新会话表
         try {
-            Integer uid = Integer.parseInt(request.getUserId());
+            userId = Integer.parseInt(request.getUserId());
             Conversation conv = new Conversation();
             conv.setId(conversationId);
-            conv.setUserId(uid);
+            conv.setUserId(userId);
+            conv.setRoleId(roleId);
             String title = "新对话";
             if (request.getMessage() != null && request.getMessage().length() > 0) {
                 title = request.getMessage().length() > 15 ? request.getMessage().substring(0, 15) + "..." : request.getMessage();
@@ -92,14 +100,21 @@ public class ChatServiceImpl implements ChatService {
         } catch (Exception e) {
             log.error("保存会话失败", e);
         }
-        // 1️⃣ 获取长期记忆摘要
+        
+        // 1️⃣ 构建包含角色设定的核心 System Prompt（统一走 RoleCardService）
+        StringBuilder sysPrompt = new StringBuilder();
+        sysPrompt.append(roleCardService.buildSystemPrompt(roleId)).append("\n\n");
+
+        // 2️⃣ 加载长期记忆 (RAG) 和近期总结
+        String longTermMemory = ragService.searchLongTermMemoryContext(userId, roleId, request.getMessage(), 3);
+        if (longTermMemory != null && !longTermMemory.isEmpty()) {
+            sysPrompt.append("【曾经闪过的往事片段】\n").append(longTermMemory).append("\n\n");
+        }
+
         Memory memory = memoryService.findByConversationId(conversationId);
         String memorySummary = (memory != null) ? memory.getSummary() : null;
-
-        // 2️⃣ 构建系统指令文本（基础 system prompt + 长期记忆摘要）
-        String systemPromptText = promptService.getSystemPrompt();
         if (memorySummary != null && !memorySummary.isEmpty()) {
-            systemPromptText += "\n\n【长期记忆】\n" + memorySummary;
+            sysPrompt.append("【近期聊天前情提要】\n").append(memorySummary).append("\n\n");
         }
 
         // 3️⃣ 创建 ChatMemory —— 自动从 history 表加载历史消息
@@ -138,8 +153,7 @@ public class ChatServiceImpl implements ChatService {
         chatMemory.add(UserMessage.from(textToSave));
         // 6️⃣ 组装消息列表：系统指令对 + ChatMemory 历史消息
         List<ChatMessage> allMessages = new ArrayList<>();
-        allMessages.add(UserMessage.from(systemPromptText));
-        allMessages.add(AiMessage.from("好的，我明白了。"));
+        allMessages.add(dev.langchain4j.data.message.SystemMessage.from(sysPrompt.toString()));
         allMessages.addAll(chatMemory.messages());
 
         // 7️⃣ 若当前请求包含图片，则临时替换最后一条消息为多模态内容，以便发送给具有视觉能力的模型分析
@@ -275,5 +289,70 @@ public class ChatServiceImpl implements ChatService {
         }
     }
 
-    
+    @Override
+    public String chatBlocking(String conversationId, String message, Integer userId, Integer roleId) {
+        // 1. 保存或更新会话表
+        Conversation conversation = new Conversation();
+        conversation.setId(conversationId);
+        conversation.setUserId(userId);
+        conversation.setRoleId(roleId);
+        conversation.setTitle("语音角色扮演会话");
+        conversationMapper.insertOrUpdate(conversation);
+
+        // 2. 加载短期记忆窗口
+        ChatMemory chatMemory = MessageWindowChatMemory.builder()
+                .id(conversationId)
+                .maxMessages(MAX_MEMORY_MESSAGES)
+                .chatMemoryStore(chatMemoryStore)
+                .build();
+
+        // 3. 构建包含角色设定的核心 System Prompt（统一走 RoleCardService）
+        StringBuilder sysPrompt = new StringBuilder();
+        sysPrompt.append(roleCardService.buildSystemPrompt(roleId)).append("\n");
+        sysPrompt.append("【语音输出补充】\n")
+                 .append("你的回答将被转换为语音进行播放，所以请返回纯文本的口语化对白，避免 markdown 语法和复杂书面符号。\n\n");
+
+        // 4. 加载长期记忆 (RAG)
+        String longTermMemory = ragService.searchLongTermMemoryContext(userId, roleId, message, 3);
+        if (longTermMemory != null && !longTermMemory.isEmpty()) {
+            sysPrompt.append("【曾经零碎的长期记忆】（以下是你脑海中闪过的往事，作为你的经验和先验知识参考）：\n")
+                     .append(longTermMemory).append("\n\n");
+        }
+        
+        // 5. 加载事件总结 (Summary Memory)
+        Memory memory = memoryService.findByConversationId(conversationId);
+        if (memory != null && memory.getSummary() != null && !memory.getSummary().isEmpty()) {
+            sysPrompt.append("【近期聊天前情提要】\n").append(memory.getSummary()).append("\n\n");
+        }
+
+        // 6. 拼装消息，发送给模型
+        List<ChatMessage> finalMessages = new ArrayList<>();
+        finalMessages.add(dev.langchain4j.data.message.SystemMessage.from(sysPrompt.toString()));
+        
+        // 加上短期上下文
+        finalMessages.addAll(chatMemory.messages());
+        
+        // 加上当前用户消息
+        UserMessage currentUserMsg = UserMessage.from(message);
+        finalMessages.add(currentUserMsg);
+
+        try {
+            ChatResponse response = chatModel.chat(finalMessages);
+            String aiText = response.aiMessage().text();
+            
+            // 将最新回合加入记忆库
+            chatMemory.add(currentUserMsg);
+            chatMemory.add(AiMessage.from(aiText));
+            
+            // 异步触发判断是否需要浓缩记忆推入 RAG
+            new Thread(() -> {
+                memoryService.compressAndExtractLongTermMemory(conversationId, userId, roleId);
+            }).start();
+            
+            return aiText;
+        } catch (Exception e) {
+            log.error("AI 角色扮演语音聊天失败", e);
+            return "（思考中断了，请再说一遍好吗...）";
+        }
+    }
 }

@@ -25,4 +25,6 @@ public interface HistoryMapper {
                       @Param("limit") int limit);
 
     void deleteByConversationId(@Param("conversationId") String conversationId);
+
+    void deleteById(@Param("id") String id);
 }

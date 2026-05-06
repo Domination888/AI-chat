@@ -10,4 +10,9 @@ public interface MemoryService {
     void updateMemory(String conversationId, String summary, int tokenCount);
 
     void compressIfNeeded(String conversationId);
+    
+    /**
+     * 为角色扮演系统特制的压缩归纳，将该总结推入 RAG 的角色长期记忆
+     */
+    void compressAndExtractLongTermMemory(String conversationId, Integer userId, Integer roleId);
 }

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.example.aichat.mapper.RoleCardMapper">
+
+    <resultMap id="RoleCardResultMap" type="org.example.aichat.dto.RoleCard">
+        <id property="id" column="id"/>
+        <result property="name" column="name"/>
+        <result property="avatar" column="avatar"/>
+        <result property="profile" column="profile"/>
+        <result property="background" column="background"/>
+        <result property="personality" column="personality"/>
+        <result property="exampleDialogue" column="example_dialogue"/>
+        <result property="greeting" column="greeting"/>
+        <result property="voiceId" column="voice_id"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO role_card (
+            name, avatar, profile, background, personality, example_dialogue, greeting, voice_id
+        ) VALUES (
+            #{name}, #{avatar}, #{profile}, #{background}, #{personality}, #{exampleDialogue}, #{greeting}, #{voiceId}
+        )
+    </insert>
+
+    <select id="findById" resultMap="RoleCardResultMap">
+        SELECT * FROM role_card WHERE id = #{id}
+    </select>
+    
+    <select id="findAll" resultMap="RoleCardResultMap">
+        SELECT * FROM role_card ORDER BY id DESC
+    </select>
+
+    <update id="update">
+        UPDATE role_card
+        <set>
+            <if test="name != null">name = #{name},</if>
+            <if test="avatar != null">avatar = #{avatar},</if>
+            <if test="profile != null">profile = #{profile},</if>
+            <if test="background != null">background = #{background},</if>
+            <if test="personality != null">personality = #{personality},</if>
+            <if test="exampleDialogue != null">example_dialogue = #{exampleDialogue},</if>
+            <if test="greeting != null">greeting = #{greeting},</if>
+            <if test="voiceId != null">voice_id = #{voiceId},</if>
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM role_card WHERE id = #{id}
+    </delete>
+
+</mapper>
