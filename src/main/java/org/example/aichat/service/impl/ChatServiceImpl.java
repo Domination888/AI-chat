@@ -185,7 +185,9 @@ public class ChatServiceImpl implements ChatService {
         }
 
         // 9️⃣ 本地 MCP 工具调用（真正的 Agent 模式，模型自主决定）
-        List<ToolSpecification> localToolSpecs = getLocalToolSpecs();
+        //    若调用方明确关闭 tools（如语音通道），跳过工具下发，避免 Gemma3 jinja 模板渲染异常
+        List<ToolSpecification> localToolSpecs =
+                Boolean.FALSE.equals(request.getTools()) ? List.of() : getLocalToolSpecs();
 
         log.debug("发送消息列表大小: {}, conversationId: {}", allMessages.size(), conversationId);
 

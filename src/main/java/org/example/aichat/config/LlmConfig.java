@@ -11,35 +11,60 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.time.Duration;
+
+/**
+ * LLM / Embedding 客户端配置
+ * 所有连接信息都在 application-local.yml（llm.* / embedding.*）里，严禁硬编码。
+ * 规则：LLM 必须走 Win LM Studio（唯一有 NVIDIA GPU 的节点）。
+ */
 @Configuration
 public class LlmConfig {
 
-    private static final String BASE_URL = "http://localhost:1234/v1";
-    private static final String MODEL_NAME = "qwen3.5-9b-ud";
+    @Value("${llm.base-url}")
+    private String llmBaseUrl;
 
-    @Value("${embedding.base-url:http://localhost:1234/v1}")
+    @Value("${llm.model-name}")
+    private String llmModelName;
+
+    @Value("${llm.streaming-model-name:${llm.model-name}}")
+    private String llmStreamingModelName;
+
+    @Value("${llm.connect-timeout-ms:3000}")
+    private long llmConnectTimeoutMs;
+
+    @Value("${llm.read-timeout-ms:60000}")
+    private long llmReadTimeoutMs;
+
+    @Value("${llm.max-retries:1}")
+    private int llmMaxRetries;
+
+    @Value("${embedding.base-url}")
     private String embeddingBaseUrl;
 
-    @Value("${embedding.model-name:text-embedding-qwen3-embedding-0.6b}")
+    @Value("${embedding.model-name}")
     private String embeddingModelName;
 
     @Bean
     public StreamingChatModel streamingChatModel() {
         return OpenAiStreamingChatModel.builder()
-                .baseUrl(BASE_URL)
-                .modelName(MODEL_NAME)
+                .baseUrl(llmBaseUrl)
+                .modelName(llmStreamingModelName)
+                .timeout(Duration.ofMillis(llmReadTimeoutMs))
                 .httpClientBuilder(new SpringRestClientBuilder())
                 .build();
     }
 
     /**
-     * 非流式 ChatModel，用于记忆压缩摘要等内部调用
+     * 非流式 ChatModel，用于记忆压缩摘要等内部调用。
      */
     @Bean
     public ChatModel chatModel() {
         return OpenAiChatModel.builder()
-                .baseUrl(BASE_URL)
-                .modelName(MODEL_NAME)
+                .baseUrl(llmBaseUrl)
+                .modelName(llmModelName)
+                .timeout(Duration.ofMillis(llmReadTimeoutMs))
+                .maxRetries(llmMaxRetries)
                 .httpClientBuilder(new SpringRestClientBuilder())
                 .build();
     }
@@ -52,6 +77,8 @@ public class LlmConfig {
         return OpenAiEmbeddingModel.builder()
                 .baseUrl(embeddingBaseUrl)
                 .modelName(embeddingModelName)
+                .timeout(Duration.ofMillis(llmReadTimeoutMs))
+                .maxRetries(llmMaxRetries)
                 .httpClientBuilder(new SpringRestClientBuilder())
                 .build();
     }

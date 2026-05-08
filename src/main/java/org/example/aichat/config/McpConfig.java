@@ -11,13 +11,16 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
 /**
- * 智谱 MCP Web Search 配置。
- * 通过 SSE 方式连接智谱 MCP 搜索服务，为 LLM 提供联网搜索能力。
+ * MCP 客户端配置：智谱 SSE + 本地 stdio prime-mcp-server。
  */
 @Slf4j
 @Configuration
@@ -29,10 +32,19 @@ public class McpConfig {
     @Value("${mcp.zhipu.api-key}")
     private String apiKey;
 
-    // Spring Boot 自动将逗号分隔的字符串拆分为数组
-    // 例如: java,-jar,C:/path/to/prime-mcp-server-1.0.0.jar
-    @Value("${mcp.local.command:java,prime_mcp_server.jar}")
-    private String[] localCommand;
+    /**
+     * prime-mcp-server fat jar 的路径。优先级：
+     *   1. 环境变量 PRIME_MCP_JAR（在 yml 里通过 ${PRIME_MCP_JAR:...} 引入）
+     *   2. yml mcp.local.jar-path
+     *   3. 默认 prime-mcp-server/target/prime-mcp-server-1.0.0.jar（相对工作目录）
+     * 相对路径会基于 user.dir（后端启动时所在目录）解析为绝对路径。
+     */
+    @Value("${mcp.local.jar-path:prime-mcp-server/target/prime-mcp-server-1.0.0.jar}")
+    private String localJarPath;
+
+    /** java 命令前缀，逗号分隔。默认 java,-jar；如需调参可改为 java,-Xmx256m,-jar 等。 */
+    @Value("${mcp.local.java-args:java,-jar}")
+    private String[] localJavaArgs;
 
     private McpClient zhipuClient;
     private McpClient localClient;
@@ -55,15 +67,24 @@ public class McpConfig {
     }
 
     /**
-     * 本地质数判断 MCP 服务（stdio 方式，通过子进程通信）。
-     * 需要安装 Python 和 mcp 包：pip install mcp
-     * 通过 mcp.local.enabled=true 启用。
+     * 本地 prime-mcp-server（stdio 子进程通信）。
+     * 通过 mcp.local.enabled=true 启用；jar 不存在时降级为不创建 Bean，启动不阻塞。
      */
     @Bean
     @ConditionalOnProperty(name = "mcp.local.enabled", havingValue = "true")
     public McpClient localMcpClient() {
-        List<String> cmd = Arrays.asList(localCommand);
-        log.info("初始化本地质数 MCP Server，命令: {}", cmd);
+        Path jar = resolveJarPath(localJarPath);
+        if (!Files.isRegularFile(jar)) {
+            log.warn("prime-mcp jar 不存在: {} （工作目录={}），跳过本地 MCP 客户端初始化。"
+                    + "可执行 cd prime-mcp-server && ../mvnw package 后重启。",
+                    jar, System.getProperty("user.dir"));
+            return null;
+        }
+
+        List<String> cmd = new ArrayList<>(Arrays.asList(localJavaArgs));
+        cmd.add(jar.toString());
+        log.info("初始化本地 prime-mcp-server，命令: {}", cmd);
+
         StdioMcpTransport transport = new StdioMcpTransport.Builder()
                 .command(cmd)
                 .logEvents(true)
@@ -73,6 +94,14 @@ public class McpConfig {
                 .build();
         log.info("本地 MCP Client 初始化完成");
         return localClient;
+    }
+
+    private Path resolveJarPath(String raw) {
+        Path p = Paths.get(raw);
+        if (!p.isAbsolute()) {
+            p = Paths.get(System.getProperty("user.dir")).resolve(p);
+        }
+        return p.normalize();
     }
 
     @PreDestroy

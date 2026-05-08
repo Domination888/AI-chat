@@ -53,16 +53,30 @@ public class RagServiceImpl implements RagService {
     @Value("${rag.embedding-batch-size:32}")
     private int embeddingBatchSize;
 
+    @Value("${rag.eager-init:false}")
+    private boolean eagerInit;
+
     private volatile List<RagChunk> chunks = List.of();
 
     @PostConstruct
     public void init() {
         int count = loadFromRedis();
-        if (count == 0) {
-            log.info("Redis 中无分块数据，从本地加载文件并向量化...");
-            count = reload();
+        if (count > 0) {
+            log.info("RAG 初始化完成（命中 Redis 缓存），分块数: {}", count);
+            return;
         }
-        log.info("RAG 初始化完成，分块数: {}", count);
+        if (!eagerInit) {
+            log.warn("RAG 未命中 Redis 缓存且 rag.eager-init=false，跳过启动期向量化；"
+                    + "可在 Win LM Studio 就绪后 POST /api/rag/reload 手动触发");
+            return;
+        }
+        log.info("Redis 中无分块数据，从本地加载文件并向量化...");
+        try {
+            count = reload();
+            log.info("RAG 初始化完成，分块数: {}", count);
+        } catch (Exception e) {
+            log.error("RAG 启动期向量化失败（已降级为空索引，不阻塞应用启动）：{}", e.getMessage());
+        }
     }
 
     private int loadFromRedis() {

@@ -29,4 +29,10 @@ public class ChatRequest {
 
     // 是否启用本地知识库检索（RAG）
     private Boolean rag = false;
+
+    // 是否允许本地 MCP 工具调用（Agent 模式）。
+    // 语音通道默认关掉：
+    //   1) 降低延迟
+    //   2) 规避 LM Studio 某些模型（如 Gemma3）jinja 模板在携带 tools 字段时的渲染 bug
+    private Boolean tools = true;
 }

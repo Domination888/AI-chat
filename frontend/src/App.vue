@@ -123,24 +123,37 @@
             <button @click="toggleVoiceMode" class="text-xs px-3 py-1 rounded-full transition" :class="isVoiceMode ? 'bg-pink-500 text-white' : 'bg-gray-200 text-gray-600'">
               {{ isVoiceMode ? '🎙️ 按住说话模式' : '⌨️ 键盘输入模式' }}
             </button>
-            <div class="flex items-center gap-4">
-              <!-- Toggle RAG -->
-              <label class="flex items-center cursor-pointer group">
-                <div class="relative">
-                  <input type="checkbox" v-model="useRag" class="sr-only">
-                  <div class="block bg-gray-200 group-hover:bg-gray-300 w-8 h-4 rounded-full transition-colors" :class="{'bg-blue-400 group-hover:bg-blue-500': useRag}"></div>
-                  <div class="dot absolute left-0.5 top-0.5 bg-white w-3 h-3 rounded-full transition transform" :class="{'translate-x-4': useRag}"></div>
-                </div>
-                <div class="ml-2 text-xs font-medium text-gray-500 transition-colors" :class="{'text-blue-600': useRag}">RAG</div>
+
+            <!-- Toggles：Web Search / Tools。RAG 已默认常开不再展示 -->
+            <div class="flex items-center gap-5">
+
+              <!-- Web Search：开启后会强制 Tools 也开启（联网搜索本质是 MCP tool） -->
+              <label class="flex items-center cursor-pointer select-none" title="联网搜索（智谱 Web Search MCP）">
+                <span class="mr-2 text-xs font-medium transition-colors"
+                      :class="useSearch ? 'text-emerald-600' : 'text-gray-500'">联网</span>
+                <button type="button"
+                        @click.prevent="toggleSearch"
+                        class="relative w-10 h-5 rounded-full transition-colors duration-200"
+                        :class="useSearch ? 'bg-emerald-500' : 'bg-gray-300'">
+                  <span class="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all duration-200"
+                        :class="useSearch ? 'left-[22px]' : 'left-0.5'"></span>
+                </button>
               </label>
-              <!-- Toggle Web Search -->
-              <label class="flex items-center cursor-pointer group">
-                <div class="relative">
-                  <input type="checkbox" v-model="useSearch" class="sr-only">
-                  <div class="block bg-gray-200 group-hover:bg-gray-300 w-8 h-4 rounded-full transition-colors" :class="{'bg-emerald-400 group-hover:bg-emerald-500': useSearch}"></div>
-                  <div class="dot absolute left-0.5 top-0.5 bg-white w-3 h-3 rounded-full transition transform" :class="{'translate-x-4': useSearch}"></div>
-                </div>
-                <div class="ml-2 text-xs font-medium text-gray-500 transition-colors" :class="{'text-emerald-600': useSearch}">Web Search</div>
+
+              <!-- Tools：本地 MCP 工具（数学/素数等）。联网开启时强制开 -->
+              <label class="flex items-center cursor-pointer select-none"
+                     :class="useSearch ? 'opacity-60' : ''"
+                     :title="useSearch ? '联网搜索已开启，工具自动开启' : '本地 MCP 工具调用'">
+                <span class="mr-2 text-xs font-medium transition-colors"
+                      :class="useTools ? 'text-blue-600' : 'text-gray-500'">工具</span>
+                <button type="button"
+                        @click.prevent="toggleTools"
+                        :disabled="useSearch"
+                        class="relative w-10 h-5 rounded-full transition-colors duration-200 disabled:cursor-not-allowed"
+                        :class="useTools ? 'bg-blue-500' : 'bg-gray-300'">
+                  <span class="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all duration-200"
+                        :class="useTools ? 'left-[22px]' : 'left-0.5'"></span>
+                </button>
               </label>
             </div>
           </div>
@@ -211,8 +224,19 @@ const inputRaw = ref('')
 const messages = ref([])
 const loading = ref(false)
 
-const useRag = ref(true)
 const useSearch = ref(false)
+// 本地 MCP 工具调用开关（默认开启；联网搜索开启时强制跟随为 true）
+const useTools = ref(true)
+
+const toggleSearch = () => {
+  useSearch.value = !useSearch.value
+  // 联网搜索走的是 MCP，工具必须开
+  if (useSearch.value) useTools.value = true
+}
+const toggleTools = () => {
+  if (useSearch.value) return // 联网开启时不允许单独关工具
+  useTools.value = !useTools.value
+}
 
 const fileInput = ref(null)
 const selectedImages = ref([])
@@ -406,7 +430,8 @@ const sendMessage = async (e) => {
     images: currentImages.length > 0 ? currentImages : null,
     stream: true,
     search: useSearch.value,
-    rag: useRag.value,
+    rag: true,                       // RAG 默认常开，保证角色设定 + 长期记忆准确
+    tools: useTools.value,           // 本地 MCP 工具（素数/数学等），联网开启时强制 true
     roleId: selectedRole.value ? selectedRole.value.id : 1
   }
 
@@ -482,50 +507,133 @@ const stopRecording = () => {
   mediaRecorder.stream.getTracks().forEach(track => track.stop());
 }
 
+// ============================================================
+// 音频播放队列：串行播放 TTS 返回的 wav 片段，保证按句子顺序发声
+// ============================================================
+const audioQueue = []
+let audioPlaying = false
+
+const enqueueAudioBase64 = (b64) => {
+  try {
+    const bin = atob(b64)
+    const bytes = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }))
+    audioQueue.push(url)
+    pumpAudioQueue()
+  } catch (e) {
+    console.error('audio base64 decode fail', e)
+  }
+}
+
+const pumpAudioQueue = () => {
+  if (audioPlaying) return
+  const url = audioQueue.shift()
+  if (!url) return
+  audioPlaying = true
+  const audio = new Audio(url)
+  audio.onended = () => {
+    URL.revokeObjectURL(url)
+    audioPlaying = false
+    pumpAudioQueue()
+  }
+  audio.onerror = () => {
+    URL.revokeObjectURL(url)
+    audioPlaying = false
+    pumpAudioQueue()
+  }
+  audio.play().catch(e => {
+    console.error('播音失败', e)
+    audioPlaying = false
+    pumpAudioQueue()
+  })
+}
+
+// ============================================================
+// 流式语音对话：ASR → LLM(token 流) → 句子级 TTS → 串行播放
+// SSE 事件：asr / text / tts / done / error
+// ============================================================
 const sendAudio = async (audioBlob) => {
-  loading.value = true;
-  const uiAudioMsgIndex = messages.value.length;
-  messages.value.push({ role: 'user', content: '...', isAudio: true });
-  scrollToBottom();
-  
-  const formData = new FormData();
-  formData.append('file', audioBlob, 'record.webm');
-  formData.append('conversationId', currentConversationId.value);
-  formData.append('roleId', selectedRole.value ? selectedRole.value.id : 1);
-  formData.append('voiceId', selectedRole.value?.voiceId || 'default');
-  formData.append('userId', user.value.id);
+  loading.value = true
+
+  // 占位：用户气泡（ASR 文本回填后替换）
+  const userMsgIndex = messages.value.length
+  messages.value.push({ role: 'user', content: '🎙️ 识别中...', isAudio: true })
+  const aiMsgIndex = userMsgIndex + 1
+  messages.value.push({ role: 'ai', content: '' })
+  scrollToBottom()
+
+  const formData = new FormData()
+  formData.append('file', audioBlob, 'record.webm')
+  formData.append('conversationId', currentConversationId.value)
+  formData.append('roleId', selectedRole.value ? selectedRole.value.id : 1)
+  formData.append('voiceId', selectedRole.value?.voiceId || '')
+  formData.append('userId', user.value.id)
 
   try {
-    const aiMsgIndex = messages.value.length;
-    messages.value.push({ role: 'ai', content: '正在思考...' });
+    const response = await fetch('/api/audio/chat-stream', {
+      method: 'POST',
+      body: formData,
+      headers: { 'Accept': 'text/event-stream' }
+    })
+    if (!response.ok || !response.body) throw new Error('HTTP error')
 
-    const response = await fetch('/api/audio/chat', { method: 'POST', body: formData });
-    if (!response.ok) throw new Error("HTTP error");
-    
-    const arrayBuffer = await response.arrayBuffer();
-    const textHeader = response.headers.get('X-AI-Response-Text');
-    let decodedText = '【语音回复】';
-    if (textHeader) {
-      decodedText = decodeURIComponent(textHeader).replace(/\+/g, ' ');
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder('utf-8')
+    let buffer = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const events = buffer.split(/\r?\n\r?\n/)
+      buffer = events.pop() || ''
+      for (const ev of events) {
+        if (!ev.trim()) continue
+        // 解析 SSE: event: <name>  + data: <json>
+        let evName = 'message'
+        const dataLines = []
+        for (const line of ev.split(/\r?\n/)) {
+          if (line.startsWith('event:')) evName = line.substring(6).trim()
+          else if (line.startsWith('data:')) {
+            let t = line.substring(5)
+            if (t.startsWith(' ')) t = t.substring(1)
+            dataLines.push(t)
+          }
+        }
+        if (!dataLines.length) continue
+        let payload = {}
+        try { payload = JSON.parse(dataLines.join('\n')) } catch { payload = {} }
+
+        if (evName === 'asr') {
+          messages.value[userMsgIndex].content = payload.text || ''
+          messages.value[userMsgIndex].isAudio = false
+        } else if (evName === 'text') {
+          messages.value[aiMsgIndex].content += (payload.delta || '')
+          scrollToBottom()
+        } else if (evName === 'tts') {
+          if (payload.audioBase64) enqueueAudioBase64(payload.audioBase64)
+          else if (payload.error) console.warn('TTS 失败', payload)
+        } else if (evName === 'error') {
+          messages.value[aiMsgIndex].content += `\n[错误] ${payload.message || ''}`
+        } else if (evName === 'done') {
+          // 流结束，啥也不做
+        }
+      }
     }
-    messages.value[aiMsgIndex].content = decodedText;
-
-    const audioUrl = URL.createObjectURL(new Blob([arrayBuffer]));
-    messages.value[aiMsgIndex].audioUrl = audioUrl;
-    playAudio(audioUrl);
-    scrollToBottom();
-    
-    if (messages.value.length <= 2) await loadConversations()
+    if (messages.value.length <= 3) await loadConversations()
   } catch (error) {
-    messages.value.push({ role: 'ai', content: '[Error: 无法获取语音或解析出错]' });
+    console.error(error)
+    if (!messages.value[aiMsgIndex].content) {
+      messages.value[aiMsgIndex].content = '[Error: 语音流式对话失败]'
+    }
   } finally {
-    loading.value = false;
+    loading.value = false
   }
 }
 
 const playAudio = (url) => {
-  const audio = new Audio(url);
-  audio.play().catch(e => console.error("播音失败", e));
+  const audio = new Audio(url)
+  audio.play().catch(e => console.error('播音失败', e))
 }
 </script>
 <style>

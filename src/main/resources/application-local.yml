@@ -21,22 +21,74 @@ mcp:
     api-key: b10d5aa03c3348b688c51fc00cd4dbfb.uFxrmeRwiuFGNhpe
   local:
     enabled: true
-    # 启动本地 prime-mcp-server JAR 的命令（逗号分隔）
-    # 先执行 cd prime-mcp-server && mvn package 生成 JAR 后，修改下面的路径
-    command: "java,-jar,C:/Users/30749/Desktop/AI-Chat/prime-mcp-server/target/prime-mcp-server-1.0.0.jar"
+    # prime-mcp-server fat jar 路径；支持：
+    #   1) 相对路径（相对后端启动时的工作目录，默认就是项目根）
+    #   2) 绝对路径
+    #   3) 环境变量 PRIME_MCP_JAR 覆盖（最高优先级）
+    # 修改打包规则前：cd prime-mcp-server && ../mvnw package
+    jar-path: ${PRIME_MCP_JAR:prime-mcp-server/target/prime-mcp-server-1.0.0.jar}
+    # 启动命令的前缀（逗号分隔）；默认 java -jar，可改为 java,-Xmx256m,-jar 等
+    java-args: "java,-jar"
 
 rag:
   chunk-size: 500
   chunk-overlap: 80
   max-context-chars: 2400
   embedding-batch-size: 32
+  # true=启动时立即加载并向量化本地知识；false=只尝试从 Redis 复用缓存，没有就等手动 POST /api/rag/reload
+  # 在 Win LLM / embedding 不稳时保持 false，避免把后端启动拖死
+  eager-init: false
+
+llm:
+  # Win 机 LM Studio (Gemma3-27B)，OpenAI 兼容；规则强约束：LLM 必须走 Win
+  base-url: http://192.168.124.2:1234/v1
+  model-name: gemma-4-31b-it
+  streaming-model-name: gemma-4-31b-it
+  # 连接超时给短一点，连不上秒失败；读超时给大模型留够吐字时间
+  connect-timeout-ms: 3000
+  read-timeout-ms: 60000
+  # 出错重试；langchain4j 默认 3 次，收敛到 1 次避免启动期日志刷屏
+  max-retries: 1
 
 embedding:
-  base-url: http://localhost:1234/v1
+  # 优先 Mac 本机 Core ML/MLX；尚未部署时复用 Win LM Studio 嵌入接口（需 LM Studio 加载 embedding 模型）
+  base-url: http://192.168.124.2:1234/v1
   model-name: text-embedding-qwen3-embedding-0.6b
 
 voice:
-  # SenseVoice 的本地或者云端 API 地址
-  asr-url: http://127.0.0.1:8080/api/asr
-  # GPT-SoVITS 的本地 API 地址 (默认9880)
-  tts-url: http://127.0.0.1:9880/tts
+  # SenseVoice 本机批处理接口（PLAN-002 已部署，launchd 托管）
+  asr-url: http://127.0.0.1:9000/v1/audio/transcriptions
+  asr-language: auto
+  asr-timeout-ms: 15000
+  # ---------------- TTS (GPT-SoVITS api_v2) ----------------
+  # base-url 指向本机 GPT-SoVITS api_v2 (推荐 9880)
+  tts-base-url: http://127.0.0.1:9880
+  # 首次调用前是否自动尝试切换一次权重（只切一次，避免每次请求都切）
+  tts-auto-switch-weights: true
+  # 流式块大小，越小越低延迟但音质越差：1=最高 / 2=中 / 3=最快
+  tts-streaming-mode: 2
+  # 单次 TTS 超时（毫秒），整段最长合成时间
+  tts-timeout-ms: 60000
+  # 默认音色 profile（当角色卡 voice_id 没匹配到 profile 时用这个）
+  tts-default-profile: shu
+  # 音色库 —— key 必须和 role_card.voice_id 一致即可直接命中
+  tts-profiles:
+    shu:
+      display-name: "黍（默认）"
+      # 参考音频：绝对路径，GPT-SoVITS 服务端读取本机文件
+      ref-audio-path: ${user.dir}/v4/黍/reference_audios/中文/emotions/【默认】让我看看我带来的这些渔具放到哪里好呢？.wav
+      prompt-text: "让我看看我带来的这些渔具放到哪里好呢？"
+      prompt-lang: zh
+      text-lang: zh
+      # 训练出来的 GPT / SoVITS 权重（绝对路径），后端启动后会调用 /set_gpt_weights & /set_sovits_weights 切换
+      gpt-weights: ${user.dir}/v4/黍/黍-e10.ckpt
+      sovits-weights: ${user.dir}/v4/黍/黍_e10_s190_l32.pth
+      # 情绪/风格可选参数
+      top-k: 15
+      top-p: 1.0
+      temperature: 1.0
+      speed-factor: 1.0
+    # 兜底：角色卡里预置的 voice_id (liuli_v1/xingye_v1/k_v1) 暂时都复用黍
+    liuli_v1: { display-name: "琉璃(复用黍)", alias-of: shu }
+    xingye_v1: { display-name: "星野(复用黍)", alias-of: shu }
+    k_v1: { display-name: "赛博K(复用黍)", alias-of: shu }
