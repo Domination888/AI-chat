@@ -190,9 +190,12 @@ public class ChatServiceImpl implements ChatService {
         log.debug("发送消息列表大小: {}, conversationId: {}", allMessages.size(), conversationId);
 
         final List<ChatMessage> finalMessages = allMessages;
+        final Integer finalUserId = userId;
+        final Integer finalRoleId = roleId;
 
         return Flux.create(sink -> {
-            doStreamToolLoop(finalMessages, localToolSpecs, chatMemory, conversationId, sink, new StringBuilder(), 1);
+            doStreamToolLoop(finalMessages, localToolSpecs, chatMemory, conversationId,
+                    finalUserId, finalRoleId, sink, new StringBuilder(), 1);
         });
     }
 
@@ -200,6 +203,8 @@ public class ChatServiceImpl implements ChatService {
                                   List<ToolSpecification> toolSpecs,
                                   ChatMemory chatMemory,
                                   String conversationId,
+                                  Integer userId,
+                                  Integer roleId,
                                   reactor.core.publisher.FluxSink<String> sink,
                                   StringBuilder fullResponse,
                                   int round) {
@@ -238,12 +243,23 @@ public class ChatServiceImpl implements ChatService {
                             messages.add(ToolExecutionResultMessage.from(toolReq, "工具执行失败: " + e.getMessage()));
                         }
                     }
-                    doStreamToolLoop(messages, toolSpecs, chatMemory, conversationId, sink, fullResponse, round + 1);
+                    doStreamToolLoop(messages, toolSpecs, chatMemory, conversationId,
+                            userId, roleId, sink, fullResponse, round + 1);
                 } else {
                     if (fullResponse.length() > 0) {
                         chatMemory.add(AiMessage.from(fullResponse.toString()));
                     }
                     memoryService.compressIfNeeded(conversationId);
+                    // 与 chatBlocking 分支对齐：异步抽取长期记忆并推入 Redis RAG
+                    if (userId != null && roleId != null) {
+                        new Thread(() -> {
+                            try {
+                                memoryService.compressAndExtractLongTermMemory(conversationId, userId, roleId);
+                            } catch (Exception e) {
+                                log.error("流式对话结束后抽取长期记忆失败 conversationId={}", conversationId, e);
+                            }
+                        }).start();
+                    }
                     sink.complete();
                 }
             }

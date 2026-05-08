@@ -31,8 +31,10 @@ build/
 
 ### VS Code ###
 .vscode/
-.joycode/
+
 ### Frontend ###
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+
+my-neuro-main
