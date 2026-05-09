@@ -14,15 +14,17 @@
         <result property="exampleDialogue" column="example_dialogue"/>
         <result property="greeting" column="greeting"/>
         <result property="voiceId" column="voice_id"/>
+        <result property="roleCode" column="role_code"/>
+        <result property="personaCardPath" column="persona_card_path"/>
         <result property="createdAt" column="created_at"/>
         <result property="updatedAt" column="updated_at"/>
     </resultMap>
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO role_card (
-            name, avatar, profile, background, personality, example_dialogue, greeting, voice_id
+            name, avatar, profile, background, personality, example_dialogue, greeting, voice_id, role_code, persona_card_path
         ) VALUES (
-            #{name}, #{avatar}, #{profile}, #{background}, #{personality}, #{exampleDialogue}, #{greeting}, #{voiceId}
+            #{name}, #{avatar}, #{profile}, #{background}, #{personality}, #{exampleDialogue}, #{greeting}, #{voiceId}, #{roleCode}, #{personaCardPath}
         )
     </insert>
 
@@ -45,6 +47,8 @@
             <if test="exampleDialogue != null">example_dialogue = #{exampleDialogue},</if>
             <if test="greeting != null">greeting = #{greeting},</if>
             <if test="voiceId != null">voice_id = #{voiceId},</if>
+            <if test="roleCode != null">role_code = #{roleCode},</if>
+            <if test="personaCardPath != null">persona_card_path = #{personaCardPath},</if>
         </set>
         WHERE id = #{id}
     </update>

@@ -176,11 +176,21 @@ public class ChatServiceImpl implements ChatService {
 
         // 8️⃣ 按需本地知识库检索（RAG）
         if (Boolean.TRUE.equals(request.getRag()) && request.getMessage() != null) {
-            String ragContext = ragService.retrieveContext(request.getMessage(), 3);
+            String roleCode = null;
+            try {
+                org.example.aichat.dto.RoleCard roleCard = roleCardMapper.findById(roleId);
+                if (roleCard != null) {
+                    roleCode = roleCard.getRoleCode();
+                }
+            } catch (Exception e) {
+                log.warn("读取角色 roleCode 失败，降级全局RAG，roleId={}", roleId, e);
+            }
+
+            String ragContext = ragService.retrieveContext(roleCode, request.getMessage(), 3);
             if (ragContext != null && !ragContext.isEmpty()) {
                 allMessages.add(allMessages.size() - 1, UserMessage.from(ragContext));
                 allMessages.add(allMessages.size() - 1, AiMessage.from("好的，我会优先依据本地知识库检索结果进行回答。"));
-                log.info("已注入 RAG 上下文，长度: {}", ragContext.length());
+                log.info("已注入 RAG 上下文，roleCode={}, 长度: {}", roleCode, ragContext.length());
             }
         }
 

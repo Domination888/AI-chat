@@ -14,6 +14,8 @@ public class RoleCard {
     private String exampleDialogue;
     private String greeting;
     private String voiceId;
+    private String roleCode;
+    private String personaCardPath;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

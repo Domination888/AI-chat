@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -120,6 +121,11 @@ public class RagServiceImpl implements RagService {
 
     @Override
     public String retrieveContext(String query, int topK) {
+        return retrieveContext(null, query, topK);
+    }
+
+    @Override
+    public String retrieveContext(String roleCode, String query, int topK) {
         if (!StringUtils.hasText(query) || chunks.isEmpty() || topK <= 0) {
             return "";
         }
@@ -128,15 +134,36 @@ public class RagServiceImpl implements RagService {
             Embedding queryEmbedding = embeddingModel.embed(query).content();
             float[] queryVec = queryEmbedding.vector();
 
-            List<ScoredChunk> ranked = chunks.stream()
-                    .map(chunk -> new ScoredChunk(chunk, cosineSimilarity(queryVec, chunk.embedding())))
-                    .filter(sc -> sc.score > 0.1f) // 余弦相似度 > 0.1
+            String normalizedRoleCode = StringUtils.hasText(roleCode)
+                    ? roleCode.trim().toLowerCase(Locale.ROOT)
+                    : null;
+
+            List<RagChunk> candidateChunks = chunks;
+            if (StringUtils.hasText(normalizedRoleCode)) {
+                String prefix = normalizedRoleCode + "_";
+                candidateChunks = chunks.stream()
+                        .filter(c -> c.source() != null && c.source().toLowerCase(Locale.ROOT).startsWith(prefix))
+                        .collect(Collectors.toList());
+            }
+
+            if (candidateChunks.isEmpty()) {
+                return "";
+            }
+
+            // 计算原始相似度并对 memory_cards 类型的分块加权（PLAN-005 阶段5：memory_cards 系数 ×1.3）
+            List<ScoredChunk> ranked = candidateChunks.stream()
+                    .map(chunk -> {
+                        float raw = cosineSimilarity(queryVec, chunk.embedding());
+                        float weighted = isMemoryCard(chunk) ? raw * 1.3f : raw;
+                        return new ScoredChunk(chunk, weighted);
+                    })
+                    .filter(sc -> sc.score > 0.1f)
                     .sorted(Comparator.comparingDouble(ScoredChunk::score).reversed())
                     .limit(topK)
                     .toList();
 
             if (ranked.isEmpty()) {
-                log.debug("向量检索无命中(query={}, threshold=0.1)", query);
+                log.debug("向量检索无命中(query={}, roleCode={}, threshold=0.1)", query, roleCode);
                 return "";
             }
 
@@ -161,7 +188,7 @@ public class RagServiceImpl implements RagService {
             }
             return context.toString();
         } catch (Exception e) {
-            log.error("向量检索失败 query={}", query, e);
+            log.error("向量检索失败 query={}, roleCode={}", query, roleCode, e);
             return "";
         }
     }
@@ -185,18 +212,25 @@ public class RagServiceImpl implements RagService {
         List<RagChunk> rebuilt = new ArrayList<>();
         PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
         try {
-            org.springframework.core.io.Resource[] resourcesTxt = resolver.getResources("classpath*:rag/*.txt");
-            org.springframework.core.io.Resource[] resourcesMd = resolver.getResources("classpath*:rag/*.md");
-            
-            List<org.springframework.core.io.Resource> allResources = new ArrayList<>();
-            allResources.addAll(List.of(resourcesTxt));
-            allResources.addAll(List.of(resourcesMd));
+            // 顶层全局知识库（与历史行为兼容）
+            org.springframework.core.io.Resource[] globalTxt = resolver.getResources("classpath*:rag/*.txt");
+            org.springframework.core.io.Resource[] globalMd = resolver.getResources("classpath*:rag/*.md");
+            // 角色子目录下的语料：原文 md/txt + 记忆卡 jsonl
+            org.springframework.core.io.Resource[] roleTxt = resolver.getResources("classpath*:rag/*/*.txt");
+            org.springframework.core.io.Resource[] roleMd = resolver.getResources("classpath*:rag/*/*.md");
+            org.springframework.core.io.Resource[] roleJsonl = resolver.getResources("classpath*:rag/*/*.jsonl");
+
+            List<org.springframework.core.io.Resource> textResources = new ArrayList<>();
+            textResources.addAll(List.of(globalTxt));
+            textResources.addAll(List.of(globalMd));
+            textResources.addAll(List.of(roleTxt));
+            textResources.addAll(List.of(roleMd));
 
             List<TextSegment> segmentsToEmbed = new ArrayList<>();
             List<RagChunk> tempChunks = new ArrayList<>();
 
-            // Step 1: 加载并分块
-            for (org.springframework.core.io.Resource resource : allResources) {
+            // Step 1.a: 加载文本类资源并按滑窗切块
+            for (org.springframework.core.io.Resource resource : textResources) {
                 String source = resource.getFilename() == null ? "unknown" : resource.getFilename();
                 String text = new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
                 String normalized = normalizeText(text);
@@ -219,6 +253,32 @@ public class RagServiceImpl implements RagService {
                         break;
                     }
                 }
+            }
+
+            // Step 1.b: 加载 memory_cards.jsonl —— 一行一条记忆卡，单条直接作为一个 chunk
+            //          source 命名形如 "shu_memory_cards.jsonl"，便于按角色隔离与权重识别
+            for (org.springframework.core.io.Resource resource : roleJsonl) {
+                String filename = resource.getFilename() == null ? "unknown.jsonl" : resource.getFilename();
+                String roleCode = resolveRoleCodeFromPath(resource);
+                // 把 source 强制带上 roleCode 前缀，复用现有的 prefix 过滤逻辑
+                String source = (roleCode == null ? "" : roleCode + "_") + filename;
+
+                String raw = new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                int idx = 0;
+                for (String line : raw.split("\n")) {
+                    String trimmed = line.trim();
+                    if (trimmed.isEmpty()) {
+                        continue;
+                    }
+                    String cardText = parseMemoryCardLine(trimmed);
+                    if (!StringUtils.hasText(cardText)) {
+                        continue;
+                    }
+                    Set<String> terms = extractTerms(cardText);
+                    tempChunks.add(new RagChunk(source, idx++, cardText, terms, null));
+                    segmentsToEmbed.add(TextSegment.from(cardText));
+                }
+                log.info("加载记忆卡片资源: {} -> {} 条 (roleCode={})", filename, idx, roleCode);
             }
 
             if (tempChunks.isEmpty()) {
@@ -285,6 +345,64 @@ public class RagServiceImpl implements RagService {
     }
 
     private record ScoredChunk(RagChunk chunk, float score) {
+    }
+
+    /**
+     * 判断分块是否来自 memory_cards.jsonl（用于检索权重提升）。
+     */
+    private boolean isMemoryCard(RagChunk chunk) {
+        return chunk != null
+                && chunk.source() != null
+                && chunk.source().toLowerCase(Locale.ROOT).endsWith("memory_cards.jsonl");
+    }
+
+    /**
+     * 解析 memory_cards.jsonl 单行（容错：失败时整行回退为纯文本 chunk）。
+     * 期望格式：{"type":"...","content":"...","keywords":[...]}
+     * 检索文本 = type + content + keywords，最大化召回率。
+     */
+    private String parseMemoryCardLine(String line) {
+        try {
+            com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(line);
+            String type = node.path("type").asText("");
+            String content = node.path("content").asText("");
+            if (!StringUtils.hasText(content)) {
+                return null;
+            }
+            StringBuilder sb = new StringBuilder();
+            if (StringUtils.hasText(type)) {
+                sb.append("[").append(type).append("] ");
+            }
+            sb.append(content);
+            com.fasterxml.jackson.databind.JsonNode kws = node.path("keywords");
+            if (kws.isArray() && !kws.isEmpty()) {
+                sb.append(" 关键词:");
+                for (com.fasterxml.jackson.databind.JsonNode kw : kws) {
+                    sb.append(kw.asText("")).append(" ");
+                }
+            }
+            return sb.toString().trim();
+        } catch (Exception e) {
+            log.warn("解析 memory_cards 行失败，按纯文本回退: {}", e.getMessage());
+            return line;
+        }
+    }
+
+    /**
+     * 从 classpath 资源 URI 推断 roleCode（取 rag/{roleCode}/xxx 的 roleCode 段）。
+     */
+    private String resolveRoleCodeFromPath(org.springframework.core.io.Resource resource) {
+        try {
+            String uri = resource.getURI().toString();
+            int idx = uri.indexOf("/rag/");
+            if (idx < 0) return null;
+            String tail = uri.substring(idx + "/rag/".length());
+            int slash = tail.indexOf('/');
+            if (slash <= 0) return null;
+            return tail.substring(0, slash).toLowerCase(Locale.ROOT);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     @Override
