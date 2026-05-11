@@ -120,14 +120,22 @@
         <div class="max-w-3xl mx-auto flex flex-col gap-2">
           
           <div class="flex items-center justify-between px-2">
-            <button @click="toggleVoiceMode" class="text-xs px-3 py-1 rounded-full transition" :class="isVoiceMode ? 'bg-pink-500 text-white' : 'bg-gray-200 text-gray-600'">
-              {{ isVoiceMode ? '🎙️ 按住说话模式' : '⌨️ 键盘输入模式' }}
-            </button>
+            <div class="flex items-center gap-2">
+              <button @click="toggleVoiceMode" class="text-xs px-3 py-1 rounded-full transition" :class="isVoiceMode ? 'bg-pink-500 text-white' : 'bg-gray-200 text-gray-600'">
+                {{ isVoiceMode ? '🎙️ 按住说话模式' : '⌨️ 键盘输入模式' }}
+              </button>
+              <!-- 自动解锁：默认隐藏；仅在浏览器还没解锁自动播放时作为兜底 -->
+              <button v-if="!audioUnlocked" @click="forceEnableAudio"
+                      class="text-xs px-3 py-1 rounded-full bg-amber-100 text-amber-700 hover:bg-amber-200 transition">
+                🔊 启用语音
+              </button>
 
-            <!-- Toggles：Web Search / Tools。RAG 已默认常开不再展示 -->
+            </div>
+
+            <!-- Toggles：仅展示"联网"。RAG 和本地工具默认常开（详见 PLAN-001） -->
             <div class="flex items-center gap-5">
 
-              <!-- Web Search：开启后会强制 Tools 也开启（联网搜索本质是 MCP tool） -->
+              <!-- Web Search：联网搜索（智谱 Web Search MCP），默认关闭，由用户手动开启 -->
               <label class="flex items-center cursor-pointer select-none" title="联网搜索（智谱 Web Search MCP）">
                 <span class="mr-2 text-xs font-medium transition-colors"
                       :class="useSearch ? 'text-emerald-600' : 'text-gray-500'">联网</span>
@@ -137,22 +145,6 @@
                         :class="useSearch ? 'bg-emerald-500' : 'bg-gray-300'">
                   <span class="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all duration-200"
                         :class="useSearch ? 'left-[22px]' : 'left-0.5'"></span>
-                </button>
-              </label>
-
-              <!-- Tools：本地 MCP 工具（数学/素数等）。联网开启时强制开 -->
-              <label class="flex items-center cursor-pointer select-none"
-                     :class="useSearch ? 'opacity-60' : ''"
-                     :title="useSearch ? '联网搜索已开启，工具自动开启' : '本地 MCP 工具调用'">
-                <span class="mr-2 text-xs font-medium transition-colors"
-                      :class="useTools ? 'text-blue-600' : 'text-gray-500'">工具</span>
-                <button type="button"
-                        @click.prevent="toggleTools"
-                        :disabled="useSearch"
-                        class="relative w-10 h-5 rounded-full transition-colors duration-200 disabled:cursor-not-allowed"
-                        :class="useTools ? 'bg-blue-500' : 'bg-gray-300'">
-                  <span class="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all duration-200"
-                        :class="useTools ? 'left-[22px]' : 'left-0.5'"></span>
                 </button>
               </label>
             </div>
@@ -224,18 +216,11 @@ const inputRaw = ref('')
 const messages = ref([])
 const loading = ref(false)
 
+// 联网搜索：默认关，由用户手动 toggle；其它能力（RAG、本地 MCP 工具）默认常开，前端不暴露开关
 const useSearch = ref(false)
-// 本地 MCP 工具调用开关（默认开启；联网搜索开启时强制跟随为 true）
-const useTools = ref(true)
 
 const toggleSearch = () => {
   useSearch.value = !useSearch.value
-  // 联网搜索走的是 MCP，工具必须开
-  if (useSearch.value) useTools.value = true
-}
-const toggleTools = () => {
-  if (useSearch.value) return // 联网开启时不允许单独关工具
-  useTools.value = !useTools.value
 }
 
 const fileInput = ref(null)
@@ -398,6 +383,20 @@ onMounted(() => {
     user.value = JSON.parse(saved)
     initDataAfterLogin()
   }
+  // 全局一次性手势解锁：只要用户点/按过一次（登录按钮、侧栏、输入框都算），
+  // 就把播放上下文激活。之后自动播放不再被 autoplay policy 拦截。
+  const globalUnlock = () => {
+    unlockAudioSync()
+    // 不急着 off，解锁本身幂等；等真正 unlocked 了再解绑，避免单次 play 失败错过窗口
+    if (audioUnlocked.value) {
+      document.removeEventListener('pointerdown', globalUnlock, true)
+      document.removeEventListener('keydown', globalUnlock, true)
+      document.removeEventListener('touchstart', globalUnlock, true)
+    }
+  }
+  document.addEventListener('pointerdown', globalUnlock, true)
+  document.addEventListener('keydown', globalUnlock, true)
+  document.addEventListener('touchstart', globalUnlock, true)
 })
 
 const scrollToBottom = async () => {
@@ -430,8 +429,8 @@ const sendMessage = async (e) => {
     images: currentImages.length > 0 ? currentImages : null,
     stream: true,
     search: useSearch.value,
-    rag: true,                       // RAG 默认常开，保证角色设定 + 长期记忆准确
-    tools: useTools.value,           // 本地 MCP 工具（素数/数学等），联网开启时强制 true
+    rag: true,                       // RAG 默认常开（PLAN-001），保证角色设定 + 长期记忆准确
+    tools: true,                     // 本地 MCP 工具默认常开（Gemma4 原生支持 tool-call）
     roleId: selectedRole.value ? selectedRole.value.id : 1
   }
 
@@ -477,10 +476,14 @@ const sendMessage = async (e) => {
   }
 }
 
-const toggleVoiceMode = () => { isVoiceMode.value = !isVoiceMode.value }
+const toggleVoiceMode = () => {
+  unlockAudioSync()                // 同步解锁：握住本次 click 手势
+  isVoiceMode.value = !isVoiceMode.value
+}
 
 const startRecording = async () => {
   if (loading.value || isRecording.value) return;
+  unlockAudioSync()                // 同步解锁必须在 await 前
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     mediaRecorder = new MediaRecorder(stream);
@@ -508,46 +511,172 @@ const stopRecording = () => {
 }
 
 // ============================================================
-// 音频播放队列：串行播放 TTS 返回的 wav 片段，保证按句子顺序发声
+// 音频播放队列：串行播放 TTS 返回的 wav 片段
+//
+// 核心改造：不用 <audio> 标签，改用 Web Audio API（AudioContext + BufferSource）
+// 原因：<audio>.play() 受 autoplay policy 严格拦截；而 AudioContext 一旦被任意
+// 用户手势 resume 过一次，后续 decodeAudioData → bufferSource.start() 完全
+// 不受拦截 —— 外卖来单提醒、在线游戏、桌面通知音效用的就是这个套路。
+//
+// 协议（与 AudioController.emitTts 对齐）：
+//   一个句子 idx 产生多条 SSE：
+//     { idx, seq:0,  text, chunkStart, audioBase64 }
+//     { idx, seq:k,                      audioBase64 }
+//     { idx, seq:K,  chunkEnd:true, bytes, costMs, ttfbMs }
+//   前端按 idx 累积 chunk，chunkEnd 时合成完整 wav 后入队
+//   （避免 GPT-SoVITS streaming wav 多 RIFF header 问题）
 // ============================================================
 const audioQueue = []
 let audioPlaying = false
+const audioUnlocked = ref(false)  // AudioContext 是否已 resume
+let audioCtx = null               // 全局唯一 AudioContext
+let currentSource = null          // 正在播放的 BufferSource（用于停止）
+const ttsBuffers = new Map()      // idx -> { chunks: Uint8Array[] }
 
-const enqueueAudioBase64 = (b64) => {
+/**
+ * 获取/创建全局 AudioContext。
+ * 注意：AudioContext 构造必须在用户手势同一帧，不能延迟。
+ */
+const getAudioCtx = () => {
+  if (audioCtx) return audioCtx
+  const Ctor = window.AudioContext || window.webkitAudioContext
+  if (!Ctor) return null
   try {
-    const bin = atob(b64)
-    const bytes = new Uint8Array(bin.length)
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-    const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }))
-    audioQueue.push(url)
-    pumpAudioQueue()
+    audioCtx = new Ctor()
+    return audioCtx
   } catch (e) {
-    console.error('audio base64 decode fail', e)
+    console.warn('AudioContext 构造失败', e)
+    return null
   }
+}
+
+/**
+ * 在用户手势中 resume AudioContext。幂等，同步调用。
+ * 只要 resume 过一次，整个页面生命周期内 decodeAudioData + start 都无限制。
+ */
+const unlockAudioSync = () => {
+  const ctx = getAudioCtx()
+  if (!ctx) return
+  if (ctx.state === 'running') {
+    audioUnlocked.value = true
+    pumpAudioQueue()
+    return
+  }
+  // resume 返回 Promise，但手势上下文只看"是否在手势里发起"，不看 resolve 时机
+  ctx.resume().then(() => {
+    audioUnlocked.value = true
+    pumpAudioQueue()
+  }).catch(e => {
+    console.warn('AudioContext resume pending:', e.name)
+  })
+}
+
+const forceEnableAudio = () => {
+  unlockAudioSync()
+  if (audioUnlocked.value) ElMessage.success('语音已就绪')
+}
+
+// 收到一个 SSE tts 事件
+const handleTtsEvent = (payload) => {
+  if (!payload || payload.idx === undefined) return
+  const idx = payload.idx
+  if (payload.error) {
+    console.warn('TTS 句子失败', payload)
+    ttsBuffers.delete(idx)
+    return
+  }
+  let buf = ttsBuffers.get(idx)
+  if (!buf) {
+    // 默认 48000：v2Pro/v3/v4 输出采样率（v1/v2 才是 32000）。chunkStart 包带 sampleRate 会覆盖此值
+    buf = { chunks: [], sampleRate: 48000, channels: 1, format: 'pcm_s16le' }
+    ttsBuffers.set(idx, buf)
+  }
+  // 首包带格式信息
+  if (payload.chunkStart) {
+    if (payload.sampleRate) buf.sampleRate = payload.sampleRate
+    if (payload.channels) buf.channels = payload.channels
+    if (payload.format) buf.format = payload.format
+  }
+  if (payload.audioBase64) {
+    try {
+      const bin = atob(payload.audioBase64)
+      const bytes = new Uint8Array(bin.length)
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+      buf.chunks.push(bytes)
+    } catch (e) {
+      console.error('audio chunk 解码失败', e)
+    }
+  }
+  if (payload.chunkEnd) {
+    if (buf.chunks.length === 0) {
+      ttsBuffers.delete(idx)
+      return
+    }
+    let total = 0
+    for (const c of buf.chunks) total += c.length
+    const merged = new Uint8Array(total)
+    let off = 0
+    for (const c of buf.chunks) { merged.set(c, off); off += c.length }
+    ttsBuffers.delete(idx)
+    audioQueue.push({
+      idx,
+      pcm: merged,
+      sampleRate: buf.sampleRate,
+      channels: buf.channels,
+      format: buf.format,
+    })
+    pumpAudioQueue()
+  }
+}
+
+/**
+ * 把 int16 LE 单声道 PCM 直接灌进 AudioBuffer，零解码开销。
+ * 不再走 decodeAudioData（GPT-SoVITS 的 streaming wav 多 RIFF header 会让它崩）。
+ */
+const pcmInt16ToAudioBuffer = (ctx, pcmBytes, sampleRate, channels) => {
+  const sampleCount = Math.floor(pcmBytes.length / 2 / channels)
+  const audioBuf = ctx.createBuffer(channels, sampleCount, sampleRate)
+  // DataView 处理小端 int16
+  const view = new DataView(pcmBytes.buffer, pcmBytes.byteOffset, pcmBytes.byteLength)
+  for (let ch = 0; ch < channels; ch++) {
+    const channelData = audioBuf.getChannelData(ch)
+    for (let i = 0; i < sampleCount; i++) {
+      const s16 = view.getInt16((i * channels + ch) * 2, true)
+      channelData[i] = s16 / 32768
+    }
+  }
+  return audioBuf
 }
 
 const pumpAudioQueue = () => {
   if (audioPlaying) return
-  const url = audioQueue.shift()
-  if (!url) return
+  const ctx = getAudioCtx()
+  if (!ctx) return
+  if (ctx.state !== 'running') return
+  const item = audioQueue.shift()
+  if (!item) return
   audioPlaying = true
-  const audio = new Audio(url)
-  audio.onended = () => {
-    URL.revokeObjectURL(url)
+  try {
+    const audioBuf = pcmInt16ToAudioBuffer(ctx, item.pcm, item.sampleRate, item.channels)
+    const src = ctx.createBufferSource()
+    src.buffer = audioBuf
+    src.connect(ctx.destination)
+    currentSource = src
+    src.onended = () => {
+      currentSource = null
+      audioPlaying = false
+      pumpAudioQueue()
+    }
+    src.start(0)
+  } catch (e) {
+    console.warn('PCM 播放失败 idx=' + item.idx + ':', e && e.message)
     audioPlaying = false
     pumpAudioQueue()
   }
-  audio.onerror = () => {
-    URL.revokeObjectURL(url)
-    audioPlaying = false
-    pumpAudioQueue()
-  }
-  audio.play().catch(e => {
-    console.error('播音失败', e)
-    audioPlaying = false
-    pumpAudioQueue()
-  })
 }
+
+
+
 
 // ============================================================
 // 流式语音对话：ASR → LLM(token 流) → 句子级 TTS → 串行播放
@@ -611,8 +740,7 @@ const sendAudio = async (audioBlob) => {
           messages.value[aiMsgIndex].content += (payload.delta || '')
           scrollToBottom()
         } else if (evName === 'tts') {
-          if (payload.audioBase64) enqueueAudioBase64(payload.audioBase64)
-          else if (payload.error) console.warn('TTS 失败', payload)
+          handleTtsEvent(payload)
         } else if (evName === 'error') {
           messages.value[aiMsgIndex].content += `\n[错误] ${payload.message || ''}`
         } else if (evName === 'done') {

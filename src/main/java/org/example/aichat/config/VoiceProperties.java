@@ -53,11 +53,24 @@ public class VoiceProperties {
         private String gptWeights;
         private String sovitsWeights;
 
-        // 推理参数
+        // 推理参数（必须对齐 GPT-SoVITS webui "1C-推理" 页设置，否则音色漂 + 慢）
         private int topK = 15;
         private double topP = 1.0;
         private double temperature = 1.0;
         private double speedFactor = 1.0;
+        /** 句间停顿秒数，webui 默认 0.3 */
+        private double fragmentInterval = 0.3;
+        /**
+         * 采样步数（v2Pro/v3/v4 的 VITS 扩散步数）。
+         * api_v2 默认 32，webui 默认 8 —— 漏传会让推理慢 4 倍且采样不稳。
+         */
+        private int sampleSteps = 8;
+        /**
+         * 文本切分方式，对齐 webui 选项：
+         * cut0=不切, cut1=凑四句一切, cut2=凑50字一切, cut3=按中文句号切, cut4=按英文句号切, cut5=按标点切
+         * webui 黍模型默认是"凑四句一切" → cut1
+         */
+        private String textSplitMethod = "cut1";
     }
 
     /**

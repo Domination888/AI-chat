@@ -145,14 +145,16 @@ public class AudioController {
         req.setUserId(String.valueOf(userId));
         req.setMessage(userText);
         req.setRoleId(roleId);
-        // 语音通道：
-        //  - 不带工具（绕开 LM Studio Gemma3 的 jinja 模板 bug + 降延迟）
-        //  - 默认不开联网搜索/RAG（语音对话追求低延迟，要开可后续扩展 query 参数）
+        // 语音通道开关策略（与文字通道差异化）：
+        //  - tools  = false：保首包延迟（语音 TTFB 敏感），并兜底 LM Studio 部分 Gemma jinja 模板带 tools 时的渲染异常
+        //  - search = false：语音输入不主动联网，避免不可控的延迟尖峰
+        //  - rag    = true ：保留 RAG，否则角色设定/长期记忆会丢，AI 答非所问
         req.setTools(false);
         req.setSearch(false);
-        req.setRag(false);
+        req.setRag(true);
 
-        SentenceSplitter splitter = new SentenceSplitter(10, 80);
+        // 语音场景优先首包速度：缩短最小句长，避免等太久才触发首句 TTS
+        SentenceSplitter splitter = new SentenceSplitter(6, 48);
         AtomicInteger ttsIdx = new AtomicInteger(0);
 
         Flux<String> llmFlux = chatService.chatStream(req);
@@ -187,38 +189,81 @@ public class AudioController {
     }
 
     /**
-     * 拿到一整句话后调 TTS，把 wav 字节 base64 一次性塞进 SSE。
-     * 这里串行调用：每句之间等上一句 wav 收完，避免对 GPT-SoVITS（CPU/MPS 推理）
-     * 造成并发压力（M4 + 32GB 跑大模型推理本来就紧张）。
+     * 拿到一整句话后调 TTS，chunk 到就立即推给前端 SSE（真·流式）。
+     * 协议扩展：单句会产生多条 tts 事件
+     *   - event: tts   data: {"idx":N,"text":"...","seq":0,"audioBase64":"<chunk>","chunkStart":true}
+     *   - event: tts   data: {"idx":N,"seq":1,"audioBase64":"<chunk>"}
+     *   - event: tts   data: {"idx":N,"seq":K,"audioBase64":"<chunk>","chunkEnd":true,"bytes":NNN,"costMs":XX}
+     * 前端按 idx 归类、按 seq 顺序拼装 Blob 播放。
+     *
+     * 串行调用：每句之间等上一句收完再调下一句，避免对 GPT-SoVITS 并发施压
+     * （M4 + 32GB 同时还要跑业务后端，推理并发会直接抖）。
      */
     private void emitTts(Sinks.Many<ServerSentEvent<String>> sink,
                          String sentence, String voiceId, int idx) {
+        final long t0 = System.currentTimeMillis();
+        final AtomicInteger seq = new AtomicInteger(0);
+        final long[] firstChunkCost = {-1};
         try {
-            log.info("TTS sentence#{}: {}", idx, sentence);
-            // 用 ByteArrayOutputStream 同步等完一句（GPT-SoVITS 内部已是流式生成）
-            java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+            log.info("TTS sentence#{} start: {}", idx, abbr(sentence));
             long n = voiceService.ttsStream(sentence, voiceId, chunk -> {
-                try { buf.write(chunk); } catch (Exception ignored) {}
+                int s = seq.getAndIncrement();
+                if (s == 0) {
+                    firstChunkCost[0] = System.currentTimeMillis() - t0;
+                    log.info("TTS sentence#{} first-chunk: bytes={}, ttfb={}ms", idx, chunk.length, firstChunkCost[0]);
+                }
+                String b64 = Base64.getEncoder().encodeToString(chunk);
+                Map<String, Object> ev = new HashMap<>();
+                ev.put("idx", idx);
+                ev.put("seq", s);
+                ev.put("audioBase64", b64);
+                if (s == 0) {
+                    ev.put("text", sentence);
+                    ev.put("chunkStart", true);
+                    // 告知前端音频格式：raw PCM int16 LE 单声道
+                    // 采样率（实测，curl /tts media_type=wav 后看 wav header）：
+                    //   v1/v2 = 32000Hz；v2Pro/v2ProPlus/v3/v4 = 48000Hz
+                    // 之前误填 32000 导致前端按 32k 拼 AudioBuffer → 1.5x 慢放 + 降调 → "完全不像黍"
+                    // 当前用 v2Pro 推理，正确值是 48000
+                    ev.put("format", "pcm_s16le");
+                    ev.put("sampleRate", 48000);
+                    ev.put("channels", 1);
+                }
+                sink.tryEmitNext(sse("tts", jsonObj(ev)));
             });
+            long cost = System.currentTimeMillis() - t0;
             if (n <= 0) {
-                sink.tryEmitNext(sse("tts", jsonObj(Map.of(
-                        "idx", idx,
-                        "text", sentence,
-                        "error", "tts_failed"))));
+                Map<String, Object> ev = new HashMap<>();
+                ev.put("idx", idx);
+                ev.put("text", sentence);
+                ev.put("error", "tts_failed");
+                sink.tryEmitNext(sse("tts", jsonObj(ev)));
                 return;
             }
-            String b64 = Base64.getEncoder().encodeToString(buf.toByteArray());
-            sink.tryEmitNext(sse("tts", jsonObj(Map.of(
-                    "idx", idx,
-                    "text", sentence,
-                    "audioBase64", b64))));
+            // 尾包：通知前端该句结束
+            Map<String, Object> tail = new HashMap<>();
+            tail.put("idx", idx);
+            tail.put("seq", seq.get());
+            tail.put("chunkEnd", true);
+            tail.put("bytes", n);
+            tail.put("costMs", cost);
+            tail.put("ttfbMs", firstChunkCost[0]);
+            sink.tryEmitNext(sse("tts", jsonObj(tail)));
+            log.info("TTS sentence#{} done: bytes={}, chunks={}, ttfb={}ms, total={}ms",
+                    idx, n, seq.get(), firstChunkCost[0], cost);
         } catch (Exception e) {
             log.error("emitTts 失败 idx={} sentence={}", idx, sentence, e);
-            sink.tryEmitNext(sse("tts", jsonObj(Map.of(
-                    "idx", idx,
-                    "text", sentence,
-                    "error", e.getMessage() == null ? "unknown" : e.getMessage()))));
+            Map<String, Object> ev = new HashMap<>();
+            ev.put("idx", idx);
+            ev.put("text", sentence);
+            ev.put("error", e.getMessage() == null ? "unknown" : e.getMessage());
+            sink.tryEmitNext(sse("tts", jsonObj(ev)));
         }
+    }
+
+    private static String abbr(String s) {
+        if (s == null) return "";
+        return s.length() > 40 ? s.substring(0, 40) + "..." : s;
     }
 
     private static ServerSentEvent<String> sse(String event, String data) {

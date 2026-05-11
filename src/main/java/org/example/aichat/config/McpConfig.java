@@ -53,17 +53,25 @@ public class McpConfig {
     public McpClient zhipuMcpClient() {
         String sseUrl = searchUrl + "?Authorization=" + apiKey;
         log.info("初始化智谱 MCP SSE 连接: {}", searchUrl);
-        HttpMcpTransport transport = new HttpMcpTransport.Builder()
-                .sseUrl(sseUrl)
-                .timeout(Duration.ofSeconds(60))
-                .logRequests(false)
-                .logResponses(false)
-                .build();
-        zhipuClient = new DefaultMcpClient.Builder()
-                .transport(transport)
-                .build();
-        log.info("智谱 MCP Client 初始化完成");
-        return zhipuClient;
+        try {
+            HttpMcpTransport transport = new HttpMcpTransport.Builder()
+                    .sseUrl(sseUrl)
+                    .timeout(Duration.ofSeconds(60))
+                    .logRequests(false)
+                    .logResponses(false)
+                    .build();
+            zhipuClient = new DefaultMcpClient.Builder()
+                    .transport(transport)
+                    .build();
+            log.info("智谱 MCP Client 初始化完成");
+            return zhipuClient;
+        } catch (Exception e) {
+            // 网络/SSL/外网封锁等都不应该让整个后端起不来。
+            // 智谱 MCP 是"联网搜索"才用得到的可选能力，不可达就降级，不阻塞核心对话/语音链路。
+            log.warn("智谱 MCP 初始化失败（{}），将降级为 null bean，联网搜索功能不可用。",
+                    e.getMessage());
+            return null;
+        }
     }
 
     /**

@@ -45,7 +45,7 @@ raw/黍/*.md  (档案/语音/剧情/干员对话/模组/生日…分文件)
     personality[5], speech_style, catchphrases[], taboo[],
     relationships[{who, how}], output_rules }
   ```
-- [ ] 调 Win LM Studio `:1234/v1/chat/completions`（Gemma3-27B），输入合并后的原始 md，`response_format=json_object`，`temperature=0.2`
+- [ ] 调 Win LM Studio `:1234/v1/chat/completions`（Gemma4-31B Dense），输入合并后的原始 md，`response_format=json_object`，`temperature=0.2`
 - [ ] 产出 `data/processed/shu/persona_card.json`，**硬性上限 ≤ 800 中文字**；超了就再压一轮
 - [ ] 人工校对一次（只看一次，改完锁版本）
 - [ ] **验收**：把 json 渲染回 [`role_system.txt`](src/main/resources/prompts/role_system.txt:1) 的 `{{profile/background/personality/exampleDialogue}}` 占位符，system prompt 总长 ≤ 1200 tokens

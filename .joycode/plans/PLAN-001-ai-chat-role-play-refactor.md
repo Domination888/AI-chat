@@ -14,11 +14,11 @@
 
 - 后端：Spring Boot 3 + LangChain4j（OpenAI starter 指向 Win LM Studio）+ MyBatis + MySQL + Redis
 - 前端：Vue3 + Vite + Pinia + Element Plus + Tailwind
-- LLM：Win LM Studio（Gemma3-27B），OpenAI 兼容 `:1234/v1`
+- LLM：Win LM Studio（Gemma4-31B Dense，ctx_len=8K），OpenAI 兼容 `:1234/v1`
 - **ASR：SenseVoice（Mac 本机批处理）**，HTTP POST 整段 wav 拿文本
 - **TTS：GPT-SoVITS（Mac 本机流式）**，后端 chunk 转发，前端 MSE 边收边播
 - 记忆：Redis 滑窗 + MySQL 长期 + 摘要任务
-- RAG：LangChain4j EmbeddingStore（内存版起步），Embedding 走 Mac 本机或 LM Studio
+- RAG：LangChain4j EmbeddingStore（内存版起步），Embedding **常驻 Mac 本机**（MLX bge-small-zh / bge-m3），不依赖 Win
 
 ## 部署架构（参考 PLAN-000 模块图）
 
@@ -30,7 +30,7 @@
 - [ ] 清理遗留代码，保留 [`pom.xml`](pom.xml:1)、[`init.sql`](init.sql:1) 作参考
 - [ ] 后端包结构：`controller / service / repository / domain / infra(llm,asr,tts,rag,memory) / config / dto`
 - [ ] 后端 `application.yml`（dev/local/prod），LLM `base-url=http://<win-ip>:1234/v1`
-- [ ] Win：LM Studio 加载 Gemma3-27B，开 `Serve on Local Network`，防火墙放行 1234，设静态 IP / 关休眠
+- [ ] Win：LM Studio 加载 **Gemma4-31B Dense（GGUF Q4_K_M / Q5_K_M）**，**ctx_len=8192（不要拉到 256K）**，开 `Serve on Local Network`，防火墙放行 1234，设静态 IP / 关休眠
 - [ ] Mac：`curl http://<win-ip>:1234/v1/models` 验证跨机可达
 - [ ] 前端：Vite 初始化（Vue3 + JS）+ Tailwind + Element Plus + Pinia + axios，做基础布局
 - [ ] **验收**：后端 `mvn spring-boot:run` 与前端 `npm run dev` 都能起，根路由 200，跨机调 LLM 成功
@@ -63,8 +63,17 @@
 - [ ] 启动时为每个角色构建独立 EmbeddingStore（key=roleId）
 - [ ] `RagService.retrieve(roleId, query, topK)` 注入 LangChain4j `ContentRetriever`
 - [ ] AIService 按 roleId 路由到对应 retriever
-- [ ] 前端：会话设置可开关 RAG
-- [ ] **验收**：问"你记得那次战斗吗？"能命中台词并自然引用
+- [ ] **RAG 默认常开，不在前端暴露开关**：所有角色卡 + 长期记忆都依赖 RAG，关闭等同"忘记角色设定"。`ChatRequest.rag` 默认 true，`application-local.yml` `rag.eager-init=true`，启动后台异步预热 + 首次提问最多同步等 30s。语音通道 [`AudioController`](src/main/java/org/example/aichat/controller/AudioController.java:1) 也开 RAG。
+- [ ] **验收**：问"你记得那次战斗吗？"能命中台词并自然引用；首次冷启提问 RAG 仍能命中（异步预热已完成或同步等待 < 30s）
+
+> **能力开关默认值汇总**（PLAN-008 排查手册同步维护）：
+> | 开关 | 默认 | 前端展示 | 说明 |
+> |---|---|---|---|
+> | `rag` | **true** | 否 | 角色卡 + 长期记忆都依赖；关掉等于失忆 |
+> | `tools` | **true** | 否 | 本地 MCP 工具（数学/素数/天气等），Gemma4 原生支持 tool-call |
+> | `search` | false | **是**（联网 toggle） | 联网搜索可选，默认关，由用户按需开 |
+> | 语音通道 `tools` | false | — | 语音侧追求首包延迟，强制关 |
+> | 语音通道 `rag` | true | — | 与文字通道一致，否则 AI 答非所问 |
 
 ## TODO: 阶段 6 · ASR 接入（依赖 PLAN-002 已部署）
 - [ ] 前置：[`PLAN-002`](.joycode/plans/PLAN-002-sensevoice-asr-deployment.md:1) 已跑通，SenseVoice HTTP `:9000` 可用

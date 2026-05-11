@@ -10,7 +10,7 @@
 ## 核心特性（最终态）
 
 1. **听**：麦克风实时采音 → VAD 切句 → SenseVoice ASR（先批处理跑通）→ 文本
-2. **想**：Spring Boot 后端拼装 prompt（人设 + 滑窗 + RAG 记忆 + 工具）→ Win LM Studio（Gemma3-27B）流式生成
+2. **想**：Spring Boot 后端拼装 prompt（人设 + 滑窗 + RAG 记忆 + 工具）→ Win LM Studio（Gemma4-31B Dense，ctx_len=8K）流式生成
 3. **说**：LLM token 流按句切 → GPT-SoVITS **流式 TTS**（边合成边推前端）→ 浏览器边收边播
 4. **做**：LLM 可调用 Tools（MCP 协议或自定义函数），如查天气、控制 Live2D 动作、查 RAG、写日记
 5. **打断**：用户说话/发弹幕时，立即 cancel 当前 LLM + 清 TTS 队列 + 停播放，200ms 内静音
@@ -23,7 +23,7 @@
 ┌─────────── Mac (M4 32GB) ────────────┐        ┌─ Win (4070 Ti S 16G 满) ─┐
 │                                      │        │                          │
 │  Vue3 前端 :5173/:80                  │        │  LM Studio :1234         │
-│   ├─ 麦克风采音 + VAD                  │        │  (Gemma3-27B, OpenAI 兼容) │
+│   ├─ 麦克风采音 + VAD                  │        │  (Gemma4-31B, OpenAI 兼容) │
 │   ├─ Live2D 渲染 + 表情/嘴型           │        │                          │
 │   ├─ TTS 音频流播放（保序+可打断）       │        └──────────▲───────────────┘
 │   └─ 弹幕/UI                          │                   │ SSE
@@ -64,10 +64,10 @@
 
 ## 选型决定（所有 PLAN 必须遵守）
 
-- **LLM**：Win LM Studio（Gemma3-27B），OpenAI 兼容 SSE，**唯一跨机调用**
+- **LLM**：Win LM Studio（Gemma4-31B Dense，ctx_len=8K），OpenAI 兼容 SSE，**唯一跨机调用**
 - **ASR**：**SenseVoice**（Mac 本机），先批处理（整段 wav POST）→ 后续可换流式实现
 - **TTS**：**GPT-SoVITS**（Mac 本机），**必须流式**（chunk mp3/wav 实时往前端推）
-- **Embedding**：Mac 本机（MLX bge / Core ML）或调 LM Studio embed 接口
+- **Embedding**：**Mac 本机常驻**（MLX bge-small-zh / bge-m3 或 Core ML）；**绝对不要放 Win**（显存已被 Gemma4 占满）；兜底走 DashScope / OpenAI 兼容 API
 - **MQ/缓存**：Redis（滑窗、状态、被打断标记）
 - **持久化**：MySQL（角色卡、会话、消息、长期记忆、日记）
 - **Tools**：先内置函数注册（天气、Live2D 动作、RAG 查询、记日记），后续可对接 MCP

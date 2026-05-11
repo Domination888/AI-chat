@@ -57,10 +57,43 @@ public class RagServiceImpl implements RagService {
     @Value("${rag.eager-init:false}")
     private boolean eagerInit;
 
+    /**
+     * 启动时强制重建：true 则忽略 Redis 旧缓存，每次启动都重新扫描 + 向量化（异步，不阻塞主流程）。
+     * Embedding 服务挂掉时会回退到 Redis 旧缓存，保证可用性。
+     */
+    @Value("${rag.force-rebuild-on-startup:true}")
+    private boolean forceRebuildOnStartup;
+
     private volatile List<RagChunk> chunks = List.of();
+
+    /**
+     * 启动期异步预热 future：
+     *   - 服务启动不被 embedding 远程调用阻塞
+     *   - 首次 retrieveContext 时若仍未完成，则 join 同步等一下（避免"前几次提问 RAG 没生效"的体感问题）
+     *   - 预热失败后会被重置为 null，允许后续手动 /api/rag/reload 重试
+     */
+    private volatile java.util.concurrent.CompletableFuture<Integer> warmupFuture;
 
     @PostConstruct
     public void init() {
+        // 模式 A：force-rebuild-on-startup=true（默认）
+        //   每次启动都重建：先把 Redis 旧缓存读到内存里"垫底"（保证 embedding 慢/挂时仍能检索），
+        //   然后后台异步重新扫描 + 向量化，新结果完成后无缝替换。
+        //   适合 personas/* 经常迭代的开发期 —— 改了语料/persona/memory_cards 重启就生效，不用手动 POST /api/rag/reload。
+        // 模式 B：force-rebuild-on-startup=false
+        //   保留旧逻辑：Redis 命中即停；未命中且 eager-init=true 才异步预热。
+        if (forceRebuildOnStartup) {
+            int fallback = loadFromRedis();
+            if (fallback > 0) {
+                log.info("启动重建模式：先用 Redis 旧缓存垫底（{} 个分块），后台异步重建中...", fallback);
+            } else {
+                log.info("启动重建模式：Redis 无旧缓存，后台异步从零重建...");
+            }
+            warmupFuture = java.util.concurrent.CompletableFuture.supplyAsync(this::rebuildSafely);
+            return;
+        }
+
+        // 模式 B：兼容旧行为
         int count = loadFromRedis();
         if (count > 0) {
             log.info("RAG 初始化完成（命中 Redis 缓存），分块数: {}", count);
@@ -71,12 +104,21 @@ public class RagServiceImpl implements RagService {
                     + "可在 Win LM Studio 就绪后 POST /api/rag/reload 手动触发");
             return;
         }
-        log.info("Redis 中无分块数据，从本地加载文件并向量化...");
+        log.info("Redis 中无分块数据，启动后台线程异步向量化（不阻塞主流程）...");
+        warmupFuture = java.util.concurrent.CompletableFuture.supplyAsync(this::rebuildSafely);
+    }
+
+    /**
+     * 后台重建包装：失败时不抛、不清空已有 chunks（保留 Redis 垫底数据，避免"启动后 RAG 短暂全空"）。
+     */
+    private int rebuildSafely() {
         try {
-            count = reload();
-            log.info("RAG 初始化完成，分块数: {}", count);
+            int n = reload();
+            log.info("RAG 启动重建完成，分块数: {}", n);
+            return n;
         } catch (Exception e) {
-            log.error("RAG 启动期向量化失败（已降级为空索引，不阻塞应用启动）：{}", e.getMessage());
+            log.error("RAG 启动重建失败（保留 Redis 旧缓存，可稍后 POST /api/rag/reload 重试）：{}", e.getMessage());
+            return chunks.size();
         }
     }
 
@@ -126,7 +168,13 @@ public class RagServiceImpl implements RagService {
 
     @Override
     public String retrieveContext(String roleCode, String query, int topK) {
-        if (!StringUtils.hasText(query) || chunks.isEmpty() || topK <= 0) {
+        if (!StringUtils.hasText(query) || topK <= 0) {
+            return "";
+        }
+        // 启动期可能还在异步预热：第一次提问时同步等一下，最多 30s（embedding 慢的话也认了，比"RAG 静默失效"好）
+        awaitWarmupIfNeeded();
+        if (chunks.isEmpty()) {
+            log.debug("RAG chunks 为空（预热未完成或失败），本次跳过检索");
             return "";
         }
 
@@ -193,6 +241,25 @@ public class RagServiceImpl implements RagService {
         }
     }
 
+    /**
+     * 启动期 RAG 还在异步预热时，首次检索同步等一下（最多 30s），避免"前几次提问 RAG 没命中"的诡异体感。
+     * 完成后清掉 future 引用，后续调用零开销。
+     */
+    private void awaitWarmupIfNeeded() {
+        java.util.concurrent.CompletableFuture<Integer> f = warmupFuture;
+        if (f == null || f.isDone()) {
+            return;
+        }
+        try {
+            log.info("检索请求到达但 RAG 仍在预热中，同步等待预热完成（最多 30s）...");
+            f.get(30, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (Exception e) {
+            log.warn("等待 RAG 预热超时/失败，本次按空索引处理：{}", e.getMessage());
+        } finally {
+            warmupFuture = null;
+        }
+    }
+
     private float cosineSimilarity(float[] a, float[] b) {
         if (a == null || b == null || a.length != b.length || a.length == 0) {
             return 0f;
@@ -212,13 +279,13 @@ public class RagServiceImpl implements RagService {
         List<RagChunk> rebuilt = new ArrayList<>();
         PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
         try {
-            // 顶层全局知识库（与历史行为兼容）
+            // 全局知识库（兼容历史 rag/ 目录，仅顶层 txt/md，作为可选项保留）
             org.springframework.core.io.Resource[] globalTxt = resolver.getResources("classpath*:rag/*.txt");
             org.springframework.core.io.Resource[] globalMd = resolver.getResources("classpath*:rag/*.md");
-            // 角色子目录下的语料：原文 md/txt + 记忆卡 jsonl
-            org.springframework.core.io.Resource[] roleTxt = resolver.getResources("classpath*:rag/*/*.txt");
-            org.springframework.core.io.Resource[] roleMd = resolver.getResources("classpath*:rag/*/*.md");
-            org.springframework.core.io.Resource[] roleJsonl = resolver.getResources("classpath*:rag/*/*.jsonl");
+            // 角色目录新结构：personas/{roleCode}/lore/*.md|*.txt + personas/{roleCode}/memory_cards.jsonl
+            org.springframework.core.io.Resource[] roleTxt = resolver.getResources("classpath*:personas/*/lore/*.txt");
+            org.springframework.core.io.Resource[] roleMd = resolver.getResources("classpath*:personas/*/lore/*.md");
+            org.springframework.core.io.Resource[] roleJsonl = resolver.getResources("classpath*:personas/*/memory_cards.jsonl");
 
             List<org.springframework.core.io.Resource> textResources = new ArrayList<>();
             textResources.addAll(List.of(globalTxt));
@@ -231,7 +298,10 @@ public class RagServiceImpl implements RagService {
 
             // Step 1.a: 加载文本类资源并按滑窗切块
             for (org.springframework.core.io.Resource resource : textResources) {
-                String source = resource.getFilename() == null ? "unknown" : resource.getFilename();
+                String filename = resource.getFilename() == null ? "unknown" : resource.getFilename();
+                // 角色目录下的语料 source 必须带 roleCode 前缀（如 shu_profile.md），否则 retrieveContext 的 prefix 过滤会全过滤掉
+                String roleCode = resolveRoleCodeFromPath(resource);
+                String source = roleCode == null ? filename : roleCode + "_" + filename;
                 String text = new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
                 String normalized = normalizeText(text);
                 if (!StringUtils.hasText(normalized)) {
@@ -389,17 +459,24 @@ public class RagServiceImpl implements RagService {
     }
 
     /**
-     * 从 classpath 资源 URI 推断 roleCode（取 rag/{roleCode}/xxx 的 roleCode 段）。
+     * 从 classpath 资源 URI 推断 roleCode：
+     *  - 优先匹配 personas/{roleCode}/...
+     *  - 兼容旧路径 rag/{roleCode}/...
+     *  - 无角色子目录（顶层 rag/*.md 类全局语料）返回 null
      */
     private String resolveRoleCodeFromPath(org.springframework.core.io.Resource resource) {
         try {
             String uri = resource.getURI().toString();
-            int idx = uri.indexOf("/rag/");
-            if (idx < 0) return null;
-            String tail = uri.substring(idx + "/rag/".length());
-            int slash = tail.indexOf('/');
-            if (slash <= 0) return null;
-            return tail.substring(0, slash).toLowerCase(Locale.ROOT);
+            String[] markers = {"/personas/", "/rag/"};
+            for (String marker : markers) {
+                int idx = uri.indexOf(marker);
+                if (idx < 0) continue;
+                String tail = uri.substring(idx + marker.length());
+                int slash = tail.indexOf('/');
+                if (slash <= 0) continue;
+                return tail.substring(0, slash).toLowerCase(Locale.ROOT);
+            }
+            return null;
         } catch (Exception e) {
             return null;
         }

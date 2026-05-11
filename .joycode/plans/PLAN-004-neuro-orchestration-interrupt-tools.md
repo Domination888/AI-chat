@@ -172,11 +172,9 @@
   - `write_diary(content)`
   - 后续可挂 MCP（参考 [`prime-mcp-server`](prime-mcp-server)）
 - [ ] `ToolExecutor`：拿到 `tool_calls` JSON → dispatch 到对应 handler → 拿到结果 → 以 `role=tool` 写回 messages → 再发一轮 LLM
-- [ ] 注意：LM Studio 对 function calling 支持取决于模型，**Gemma3 原生不支持 OpenAI tool-call**，需要：
-  - 方案 A：手搓 prompt 协议，让 LLM 输出固定 JSON `<tool>...</tool>`，后端正则解析
-  - 方案 B：换支持 tool 的模型（Qwen2.5、Llama3.1 instruct）
-  - 方案 C：用 LM Studio 自带的 tool-call 适配（最新版本支持）
-  - 这个选择留到动手时根据 LM Studio + Gemma3 实测决定
+- [ ] 注意：**Gemma4-31B 原生支持 OpenAI 风格 function calling / 结构化 JSON 输出**（Google 官方在 4.x 系列重点强化的能力），LM Studio 也已适配；优先走标准 `tools` + `tool_choice` 协议
+  - 兜底方案 A：手搓 prompt 协议，让 LLM 输出固定 JSON `<tool>...</tool>`，后端正则解析（仅在 LM Studio 适配出问题时启用）
+  - 兜底方案 B：临时关 `tools` 字段（语音通道已经这么做了，规避部分模型 jinja 模板渲染异常）
 - [ ] **验收**：让她"查一下北京天气" → LLM 触发 tool → 后端调 mock 接口 → 结果回灌 → 她说出最终答案
 
 ## TODO: 阶段 8 · Live2D 联动
@@ -224,7 +222,7 @@
 
 ## 风险与回退
 
-1. **Gemma3 不支持 tool calling** → 阶段 7 三个方案中挑一个
+1. **LM Studio + Gemma4 tool calling 实测异常**（如 jinja 模板渲染问题）→ 兜底走"自定义 JSON 协议"或临时关 tools，参考阶段 7
 2. **句切错切**（中文标点缺失） → 60 字硬切兜底
 3. **GPT-SoVITS 流式延迟差** → 短期回退 edge-tts
 4. **Mac 32GB 不够** → SenseVoice 切 CPU、压上下文长度、关 RAG

@@ -35,6 +35,17 @@ public class RoleController {
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
+    /**
+     * 让前端可以"摇一摇"换一句开场白，无需刷新整个角色详情。
+     * 若该角色没有 greetings.txt，则返回 DB 里固定的 greeting。
+     */
+    @GetMapping("/{id}/greeting")
+    public ResponseEntity<String> rollGreeting(@PathVariable Integer id) {
+        return roleCardService.findById(id)
+                .map(r -> ResponseEntity.ok(r.getGreeting() == null ? "" : r.getGreeting()))
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
     @PostMapping
     public RoleCard createRole(@RequestBody RoleCard roleCard) {
         return roleCardService.create(roleCard);

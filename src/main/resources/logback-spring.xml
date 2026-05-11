@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  分模块日志配置
+  ============================================================
+  日志根目录：项目根 ./log（启动时由 LOG_HOME 控制；可通过环境变量 LOG_HOME 覆盖）
+  分三个独立滚动文件，互不污染主控制台输出：
+    log/tts/tts.log           —— TTS 调用（请求参数、ttfb、字节数、错误）
+    log/asr/asr.log           —— ASR 调用（音频大小、识别结果、耗时）
+    log/prompt/prompt.log     —— 每次发到 LLM 前的完整 messages（system / 历史 / RAG / 当前）
+  滚动策略：每天 + 单文件 50MB，保留 14 天，单模块总量上限 1GB
+  控制台保持 Spring Boot 默认彩色输出，业务调试照旧
+-->
+<configuration scan="true" scanPeriod="60 seconds">
+
+    <!-- 引入 Spring Boot 默认的彩色 console 配置 -->
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+
+    <!-- 日志根目录：可被 -DLOG_HOME=... 或环境变量覆盖；默认启动目录下的 log/ -->
+    <springProperty scope="context" name="LOG_HOME" source="logging.file.path" defaultValue="log"/>
+
+    <!-- 通用 pattern：时间 | 线程 | logger | 内容 -->
+    <property name="MODULE_PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"/>
+
+    <!-- ============= TTS appender ============= -->
+    <appender name="TTS_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_HOME}/tts/tts.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_HOME}/tts/tts.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>50MB</maxFileSize>
+            <maxHistory>14</maxHistory>
+            <totalSizeCap>1GB</totalSizeCap>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${MODULE_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- ============= ASR appender ============= -->
+    <appender name="ASR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_HOME}/asr/asr.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_HOME}/asr/asr.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>50MB</maxFileSize>
+            <maxHistory>14</maxHistory>
+            <totalSizeCap>1GB</totalSizeCap>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${MODULE_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- ============= PROMPT appender ============= -->
+    <appender name="PROMPT_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_HOME}/prompt/prompt.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_HOME}/prompt/prompt.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>50MB</maxFileSize>
+            <maxHistory>14</maxHistory>
+            <totalSizeCap>1GB</totalSizeCap>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${MODULE_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!--
+      模块 logger：name 与代码里 LoggerFactory.getLogger("module.tts") 等对齐
+      additivity=false 防止重复输出到 root（控制台仍能看到原 @Slf4j 业务日志）
+    -->
+    <logger name="module.tts" level="INFO" additivity="false">
+        <appender-ref ref="TTS_FILE"/>
+        <appender-ref ref="CONSOLE"/>
+    </logger>
+
+    <logger name="module.asr" level="INFO" additivity="false">
+        <appender-ref ref="ASR_FILE"/>
+        <appender-ref ref="CONSOLE"/>
+    </logger>
+
+    <logger name="module.prompt" level="INFO" additivity="false">
+        <appender-ref ref="PROMPT_FILE"/>
+        <appender-ref ref="CONSOLE"/>
+    </logger>
+
+    <!-- root 保持 Spring Boot 默认 console 输出 -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+</configuration>

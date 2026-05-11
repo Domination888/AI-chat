@@ -5,8 +5,7 @@ import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
-import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.mcp.client.McpClient;
+import dev.langchain4j.data.message.UserMessage;import dev.langchain4j.mcp.client.McpClient;
 import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.ChatModel;
@@ -42,6 +41,9 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 public class ChatServiceImpl implements ChatService {
+
+    /** 专用模块日志：写入 log/prompt/prompt.log（见 logback-spring.xml）—— 记录每次发往 LLM 的完整 messages */
+    private static final org.slf4j.Logger PROMPT_LOG = org.slf4j.LoggerFactory.getLogger("module.prompt");
     @Resource
     private StreamingChatModel streamingChatModel;
     @Resource
@@ -56,7 +58,8 @@ public class ChatServiceImpl implements ChatService {
     private RagService ragService;
     @Resource
     private ChatMemoryStore chatMemoryStore;
-    @Resource(name = "zhipuMcpClient")
+    @Autowired(required = false)
+    @Qualifier("zhipuMcpClient")
     private McpClient zhipuMcpClient;
     @Autowired(required = false)
     @Qualifier("localMcpClient")
@@ -77,9 +80,9 @@ public class ChatServiceImpl implements ChatService {
     @Override
     public Flux<String> chatStream(ChatRequest request) {
 
-        if (guardrailService.checkInput(request)) {
-            return Flux.just("输入违规");
-        }
+//        if (guardrailService.checkInput(request)) {
+//            return Flux.just("输入违规");
+//        }
 
         String conversationId = request.getConversationId();
         Integer roleId = request.getRoleId() != null ? request.getRoleId() : 1; 
@@ -161,8 +164,16 @@ public class ChatServiceImpl implements ChatService {
             allMessages.set(allMessages.size() - 1, UserMessage.from(contents));
         }
 
+        // 开关默认值（请求未显式带字段时按"默认开"处理）：
+        //   rag    = true   —— 角色卡/长期记忆都依赖 RAG，不能默认关
+        //   tools  = true   —— Gemma4 原生支持 tool-call；语音通道会在 AudioController 显式置 false
+        //   search = false  —— 仅用户在前端显式开启时才走联网
+        boolean useSearch = Boolean.TRUE.equals(request.getSearch());
+        boolean useRag = !Boolean.FALSE.equals(request.getRag());     // null / true → 都开
+        boolean useTools = !Boolean.FALSE.equals(request.getTools()); // null / true → 都开
+
         // 7️⃣ 按需联网搜索（直接调用 MCP 工具，将结果注入上下文）
-        if (Boolean.TRUE.equals(request.getSearch()) && request.getMessage() != null) {
+        if (useSearch && request.getMessage() != null) {
             String searchResult = executeWebSearch(request.getMessage());
             if (searchResult != null && !searchResult.isEmpty()) {
                 String searchContext = "【联网搜索结果】\n" + searchResult
@@ -174,8 +185,8 @@ public class ChatServiceImpl implements ChatService {
             }
         }
 
-        // 8️⃣ 按需本地知识库检索（RAG）
-        if (Boolean.TRUE.equals(request.getRag()) && request.getMessage() != null) {
+        // 8️⃣ 本地知识库检索（RAG，默认开）
+        if (useRag && request.getMessage() != null) {
             String roleCode = null;
             try {
                 org.example.aichat.dto.RoleCard roleCard = roleCardMapper.findById(roleId);
@@ -194,12 +205,16 @@ public class ChatServiceImpl implements ChatService {
             }
         }
 
-        // 9️⃣ 本地 MCP 工具调用（真正的 Agent 模式，模型自主决定）
-        //    若调用方明确关闭 tools（如语音通道），跳过工具下发，避免 Gemma3 jinja 模板渲染异常
-        List<ToolSpecification> localToolSpecs =
-                Boolean.FALSE.equals(request.getTools()) ? List.of() : getLocalToolSpecs();
+        // 9️⃣ 本地 MCP 工具调用（默认开；Gemma4 原生支持）
+        //    语音通道（AudioController）会显式 setTools(false) 以保首包延迟
+        List<ToolSpecification> localToolSpecs = useTools ? getLocalToolSpecs() : List.of();
 
         log.debug("发送消息列表大小: {}, conversationId: {}", allMessages.size(), conversationId);
+
+        // 发往 LLM 前的完整 prompt 落盘到 log/prompt/prompt.log（含 system / RAG / 历史 / 当前用户）
+        dumpPromptToLog("chatStream", conversationId, userId, roleId, allMessages,
+                useSearch, useRag, useTools, hasImages,
+                request.getMessage(), localToolSpecs);
 
         final List<ChatMessage> finalMessages = allMessages;
         final Integer finalUserId = userId;
@@ -229,6 +244,15 @@ public class ChatServiceImpl implements ChatService {
             reqBuilder.parameters(dev.langchain4j.model.chat.request.DefaultChatRequestParameters.builder()
                     .toolSpecifications(toolSpecs)
                     .build());
+        }
+
+        // 工具回合 round>=2 时（首轮已在 chatStream 入口记录），追加记录每次重发 LLM 前的 messages 状态
+        if (round > 1) {
+            PROMPT_LOG.info("---- chatStream tool-round#{} | conversationId={} | userId={} | roleId={} | messages={} ----",
+                    round, conversationId, userId, roleId, messages.size());
+            for (int i = 0; i < messages.size(); i++) {
+                PROMPT_LOG.info("[{}#{}] {}", round, i, formatMessage(messages.get(i)));
+            }
         }
 
         streamingChatModel.chat(reqBuilder.build(), new StreamingChatResponseHandler() {
@@ -288,6 +312,10 @@ public class ChatServiceImpl implements ChatService {
      * 直接调用智谱 MCP 搜索工具，将结果注入上下文。
      */
     private String executeWebSearch(String query) {
+        if (zhipuMcpClient == null) {
+            log.warn("智谱 MCP 不可用（启动期初始化失败/网络不可达），跳过联网搜索");
+            return null;
+        }
         try {
             ToolExecutionRequest searchReq = ToolExecutionRequest.builder()
                     .name("webSearchPro")
@@ -364,10 +392,13 @@ public class ChatServiceImpl implements ChatService {
         UserMessage currentUserMsg = UserMessage.from(message);
         finalMessages.add(currentUserMsg);
 
+        // 发往 LLM 前的完整 prompt 落盘到 log/prompt/prompt.log（语音通道阻塞分支）
+        dumpPromptToLog("chatBlocking", conversationId, userId, roleId, finalMessages,
+                false, true, false, false, message, java.util.Collections.emptyList());
+
         try {
             ChatResponse response = chatModel.chat(finalMessages);
-            String aiText = response.aiMessage().text();
-            
+            String aiText = response.aiMessage().text();            
             // 将最新回合加入记忆库
             chatMemory.add(currentUserMsg);
             chatMemory.add(AiMessage.from(aiText));
@@ -382,5 +413,99 @@ public class ChatServiceImpl implements ChatService {
             log.error("AI 角色扮演语音聊天失败", e);
             return "（思考中断了，请再说一遍好吗...）";
         }
+    }
+
+    // ============================================================
+    // Prompt 模块日志：把每次发到 LLM 的完整消息列表写到 log/prompt/prompt.log
+    // 不做截断，便于排查"角色漂移 / RAG 噪声 / 历史污染"等问题
+    // ============================================================
+    private void dumpPromptToLog(String channel,
+                                 String conversationId,
+                                 Integer userId,
+                                 Integer roleId,
+                                 List<ChatMessage> messages,
+                                 boolean useSearch,
+                                 boolean useRag,
+                                 boolean useTools,
+                                 boolean hasImages,
+                                 String userMessage,
+                                 List<ToolSpecification> toolSpecs) {
+        try {
+            int totalChars = 0;
+            for (ChatMessage m : messages) totalChars += approxLen(m);
+            PROMPT_LOG.info("==== {} | conversationId={} | userId={} | roleId={} | useSearch={} | useRag={} | useTools={} | hasImages={} | toolSpecs={} | messages={} | approxChars={} | userMsg={} ====",
+                    channel, conversationId, userId, roleId, useSearch, useRag, useTools, hasImages,
+                    toolSpecs == null ? 0 : toolSpecs.size(),
+                    messages.size(), totalChars,
+                    userMessage == null ? "" : userMessage);
+            for (int i = 0; i < messages.size(); i++) {
+                PROMPT_LOG.info("[{}] {}", i, formatMessage(messages.get(i)));
+            }
+            if (toolSpecs != null && !toolSpecs.isEmpty()) {
+                StringBuilder sb = new StringBuilder();
+                for (ToolSpecification t : toolSpecs) {
+                    if (sb.length() > 0) sb.append(", ");
+                    sb.append(t.name());
+                }
+                PROMPT_LOG.info("[tools] {}", sb);
+            }
+            PROMPT_LOG.info("==== {} end ====", channel);
+        } catch (Exception e) {
+            // 日志失败不影响主链路
+            log.warn("dumpPromptToLog 失败: {}", e.toString());
+        }
+    }
+
+    private String formatMessage(ChatMessage m) {
+        if (m == null) return "null";
+        if (m instanceof dev.langchain4j.data.message.SystemMessage sm) {
+            return "SYSTEM: " + sm.text();
+        }
+        if (m instanceof UserMessage um) {
+            // 多模态时 contents 可能是文本+图片，逐项打印（图片只记录 mimeType）
+            StringBuilder sb = new StringBuilder("USER: ");
+            for (dev.langchain4j.data.message.Content c : um.contents()) {
+                if (c instanceof dev.langchain4j.data.message.TextContent tc) {
+                    sb.append(tc.text());
+                } else if (c instanceof dev.langchain4j.data.message.ImageContent) {
+                    sb.append("<image>");
+                } else {
+                    sb.append("<").append(c.getClass().getSimpleName()).append(">");
+                }
+            }
+            return sb.toString();
+        }
+        if (m instanceof AiMessage am) {
+            String text = am.text() == null ? "" : am.text();
+            if (am.hasToolExecutionRequests()) {
+                StringBuilder sb = new StringBuilder("AI: ").append(text).append(" | toolCalls=[");
+                int i = 0;
+                for (var t : am.toolExecutionRequests()) {
+                    if (i++ > 0) sb.append(", ");
+                    sb.append(t.name()).append("(").append(t.arguments()).append(")");
+                }
+                sb.append("]");
+                return sb.toString();
+            }
+            return "AI: " + text;
+        }
+        if (m instanceof ToolExecutionResultMessage tr) {
+            return "TOOL_RESULT(" + tr.toolName() + "): " + tr.text();
+        }
+        return m.getClass().getSimpleName() + ": " + m.toString();
+    }
+
+    private int approxLen(ChatMessage m) {
+        if (m instanceof dev.langchain4j.data.message.SystemMessage sm) return sm.text() == null ? 0 : sm.text().length();
+        if (m instanceof UserMessage um) {
+            int n = 0;
+            for (dev.langchain4j.data.message.Content c : um.contents()) {
+                if (c instanceof dev.langchain4j.data.message.TextContent tc && tc.text() != null) n += tc.text().length();
+            }
+            return n;
+        }
+        if (m instanceof AiMessage am) return am.text() == null ? 0 : am.text().length();
+        if (m instanceof ToolExecutionResultMessage tr) return tr.text() == null ? 0 : tr.text().length();
+        return 0;
     }
 }

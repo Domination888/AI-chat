@@ -7,6 +7,8 @@ import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.example.aichat.config.VoiceProperties;
 import org.example.aichat.service.VoiceService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.*;
@@ -38,6 +40,11 @@ import java.util.function.Consumer;
 @Slf4j
 @Service
 public class VoiceServiceImpl implements VoiceService {
+
+    /** 专用模块日志：写入 log/asr/asr.log（见 logback-spring.xml） */
+    private static final Logger ASR_LOG = LoggerFactory.getLogger("module.asr");
+    /** 专用模块日志：写入 log/tts/tts.log（见 logback-spring.xml） */
+    private static final Logger TTS_LOG = LoggerFactory.getLogger("module.tts");
 
     @Autowired
     private VoiceProperties voiceProps;
@@ -75,18 +82,24 @@ public class VoiceServiceImpl implements VoiceService {
     @Override
     public String asr(MultipartFile audioFile, String hotwords, String language) {
         if (audioFile == null || audioFile.isEmpty()) return "";
+        final long sizeBytes = audioFile.getSize();
+        final String origName = audioFile.getOriginalFilename();
+        final String contentType = audioFile.getContentType();
+        final String langUsed = StringUtils.hasText(language) ? language : voiceProps.getAsrLanguage();
+        ASR_LOG.info("ASR start | url={} | file={} | size={}B | contentType={} | language={} | hotwords={}",
+                voiceProps.getAsrUrl(), origName, sizeBytes, contentType, langUsed,
+                StringUtils.hasText(hotwords) ? hotwords : "");
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.MULTIPART_FORM_DATA);
 
             MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
-            final String origName = audioFile.getOriginalFilename();
             body.add("file", new ByteArrayResource(audioFile.getBytes()) {
                 @Override public String getFilename() {
                     return StringUtils.hasText(origName) ? origName : "audio.webm";
                 }
             });
-            body.add("language", StringUtils.hasText(language) ? language : voiceProps.getAsrLanguage());
+            body.add("language", langUsed);
             if (StringUtils.hasText(hotwords)) body.add("hotwords", hotwords);
 
             HttpEntity<MultiValueMap<String, Object>> req = new HttpEntity<>(body, headers);
@@ -96,13 +109,18 @@ public class VoiceServiceImpl implements VoiceService {
 
             if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) {
                 log.warn("ASR 响应非 2xx: status={}, body={}", resp.getStatusCode(), resp.getBody());
+                ASR_LOG.warn("ASR fail | status={} | cost={}ms | body={}",
+                        resp.getStatusCode(), cost, resp.getBody());
                 return "";
             }
             String text = parseAsrText(resp.getBody());
             log.info("ASR ok: cost={}ms, text={}", cost, text);
+            ASR_LOG.info("ASR ok | cost={}ms | textLen={} | text={}", cost, text.length(), text);
             return text;
         } catch (Exception e) {
             log.error("ASR 调用失败 (请确保 SenseVoice 已启动: {})", voiceProps.getAsrUrl(), e);
+            ASR_LOG.error("ASR error | url={} | file={} | size={}B | err={}",
+                    voiceProps.getAsrUrl(), origName, sizeBytes, e.toString(), e);
             return "";
         }
     }
@@ -135,10 +153,12 @@ public class VoiceServiceImpl implements VoiceService {
         VoiceProperties.Profile profile = voiceProps.resolveProfile(voiceId);
         if (profile == null) {
             log.warn("找不到 TTS profile: voiceId={}, 检查 voice.tts-profiles 配置", voiceId);
+            TTS_LOG.warn("TTS skip | voiceId={} | reason=profile_not_found", voiceId);
             return -1;
         }
         if (!StringUtils.hasText(profile.getRefAudioPath())) {
             log.warn("TTS profile 缺少 refAudioPath: voiceId={}", voiceId);
+            TTS_LOG.warn("TTS skip | voiceId={} | reason=missing_ref_audio", voiceId);
             return -1;
         }
 
@@ -149,6 +169,12 @@ public class VoiceServiceImpl implements VoiceService {
 
         long t0 = System.currentTimeMillis();
         long total = 0;
+        TTS_LOG.info("TTS start | voiceId={} | profile=[refAudio={}, promptText={}, lang={}, topK={}, topP={}, temp={}, speed={}, sampleSteps={}, splitMethod={}, streamingMode={}] | textLen={} | text={}",
+                voiceId, profile.getRefAudioPath(), profile.getPromptText(),
+                profile.getTextLang(), profile.getTopK(), profile.getTopP(),
+                profile.getTemperature(), profile.getSpeedFactor(), profile.getSampleSteps(),
+                profile.getTextSplitMethod(), voiceProps.getTtsStreamingMode(),
+                text.length(), text);
         try {
             ObjectNode body = objectMapper.createObjectNode();
             body.put("text", text);
@@ -160,8 +186,15 @@ public class VoiceServiceImpl implements VoiceService {
             body.put("top_p", profile.getTopP());
             body.put("temperature", profile.getTemperature());
             body.put("speed_factor", profile.getSpeedFactor());
-            body.put("text_split_method", "cut5");
-            body.put("media_type", "wav");
+            body.put("fragment_interval", profile.getFragmentInterval());
+            // v2Pro/v3/v4 关键参数：webui 默认 8，api_v2 默认 32 —— 漏传会慢 4 倍 + 音色漂
+            body.put("sample_steps", profile.getSampleSteps());
+            // webui "凑四句一切" = cut1（不是 cut5；cut5 是按标点切，会让黍模型断句异常）
+            body.put("text_split_method", profile.getTextSplitMethod());
+            // raw PCM（int16 LE，单声道，32000Hz for v2Pro/v2/v4）
+            // 不发 wav，避免 streaming wav 多 RIFF header 浏览器 decodeAudioData 失败的坑；
+            // 前端拿 PCM 直接造 AudioBuffer，零解码开销。
+            body.put("media_type", "raw");
             // streaming_mode：1=最高质量 2=中等 3=最快
             body.put("streaming_mode", voiceProps.getTtsStreamingMode());
             body.put("parallel_infer", true);
@@ -183,25 +216,36 @@ public class VoiceServiceImpl implements VoiceService {
             if (resp.statusCode() != 200) {
                 String err = new String(resp.body().readAllBytes(), StandardCharsets.UTF_8);
                 log.error("TTS 返回非 200: status={}, body={}", resp.statusCode(), err);
+                TTS_LOG.error("TTS http-fail | voiceId={} | status={} | body={}", voiceId, resp.statusCode(), err);
                 return -1;
             }
 
             byte[] tmp = new byte[8 * 1024];
+            long firstChunkAt = -1;
             try (InputStream in = resp.body()) {
                 int n;
                 while ((n = in.read(tmp)) > 0) {
+                    if (firstChunkAt < 0) {
+                        firstChunkAt = System.currentTimeMillis() - t0;
+                        log.info("TTS first-byte: voiceId={}, ttfb={}ms", voiceId, firstChunkAt);
+                        TTS_LOG.info("TTS first-byte | voiceId={} | ttfb={}ms", voiceId, firstChunkAt);
+                    }
                     byte[] copy = new byte[n];
                     System.arraycopy(tmp, 0, copy, 0, n);
                     chunkConsumer.accept(copy);
                     total += n;
                 }
             }
-            log.info("TTS ok: voiceId={}, textLen={}, bytes={}, cost={}ms",
-                    voiceId, text.length(), total, System.currentTimeMillis() - t0);
+            log.info("TTS ok: voiceId={}, textLen={}, bytes={}, ttfb={}ms, cost={}ms",
+                    voiceId, text.length(), total, firstChunkAt, System.currentTimeMillis() - t0);
+            TTS_LOG.info("TTS ok | voiceId={} | textLen={} | bytes={} | ttfb={}ms | cost={}ms",
+                    voiceId, text.length(), total, firstChunkAt, System.currentTimeMillis() - t0);
             return total;
         } catch (Exception e) {
             log.error("TTS 失败 (确保 GPT-SoVITS api_v2 已启动: {}/tts), text={}",
                     voiceProps.getTtsBaseUrl(), abbr(text), e);
+            TTS_LOG.error("TTS error | voiceId={} | textLen={} | text={} | err={}",
+                    voiceId, text.length(), abbr(text), e.toString(), e);
             return -1;
         }
     }

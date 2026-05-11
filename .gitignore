@@ -38,3 +38,8 @@ frontend/dist/
 frontend/.vite/
 
 my-neuro-main
+
+### Runtime logs (logback-spring.xml writes module logs here) ###
+log/
+*.log
+*.log.gz

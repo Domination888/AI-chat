@@ -85,7 +85,7 @@ VALUES
  '让我看看，你手里其实已经有答案了。需要的话，黍姐陪你慢慢说。',
  'shu',
  'shu',
- 'data/processed/shu/persona_card.json'),
+ 'personas/shu/persona_card.json'),
 ('琉璃', NULL,
  '傲娇的火系魔法师少女，口是心非但心地善良。',
  '出生于魔法世家，小时候因火系魔法失控烧掉爷爷的胡子，从此日夜练习魔法。',
@@ -107,3 +107,10 @@ VALUES
  'User: 你怎么判断他在撒谎？\nK: 瞳孔反应晚了0.3秒，心跳+12。不用猜，是谎。',
  '坐。别动手里的杯子——指纹我已经录了。说吧，什么案子？',
  'k_v1', NULL, NULL);
+
+-- 兼容已存在的旧数据：把黍的 persona_card_path 从历史的 data/processed/... 迁到 classpath 路径
+UPDATE `role_card`
+   SET `persona_card_path` = 'personas/shu/persona_card.json'
+ WHERE `role_code` = 'shu'
+   AND (`persona_card_path` IS NULL
+        OR `persona_card_path` LIKE 'data/processed/%');

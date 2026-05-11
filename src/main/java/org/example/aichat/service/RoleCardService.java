@@ -3,12 +3,16 @@ package org.example.aichat.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.example.aichat.dto.RoleCard;
 import org.example.aichat.mapper.RoleCardMapper;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -22,6 +26,7 @@ import java.util.Optional;
  * 优先读取 role_card.persona_card_path 指向的 JSON 人设卡，缺失时回退数据库字段。
  */
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class RoleCardService {
 
@@ -37,7 +42,38 @@ public class RoleCardService {
         if (id == null) {
             return Optional.empty();
         }
-        return Optional.ofNullable(roleCardMapper.findById(id));
+        RoleCard role = roleCardMapper.findById(id);
+        if (role == null) return Optional.empty();
+        // 若该角色有 greetings.txt 开场白库，则随机选一条覆盖 DB greeting，让首屏更生动
+        String dynamicGreeting = pickRandomGreeting(role.getRoleCode());
+        if (StringUtils.hasText(dynamicGreeting)) {
+            role.setGreeting(dynamicGreeting);
+        }
+        return Optional.of(role);
+    }
+
+    /**
+     * 从 personas/{roleCode}/greetings.txt 随机挑一行作为开场白。
+     * 文件不存在或 roleCode 为空时返回 null，由调用方决定是否回退 DB greeting。
+     */
+    public String pickRandomGreeting(String roleCode) {
+        if (!StringUtils.hasText(roleCode)) return null;
+        String path = "personas/" + roleCode.trim().toLowerCase() + "/greetings.txt";
+        Resource res = new ClassPathResource(path);
+        if (!res.exists()) return null;
+        try (InputStream in = res.getInputStream()) {
+            String text = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            List<String> lines = new java.util.ArrayList<>();
+            for (String l : text.split("\\r?\\n")) {
+                String t = l.trim();
+                if (!t.isEmpty() && !t.startsWith("#")) lines.add(t);
+            }
+            if (lines.isEmpty()) return null;
+            return lines.get(java.util.concurrent.ThreadLocalRandom.current().nextInt(lines.size()));
+        } catch (IOException e) {
+            log.warn("读取 greetings.txt 失败 path={}: {}", path, e.getMessage());
+            return null;
+        }
     }
 
     public RoleCard create(RoleCard roleCard) {
@@ -62,15 +98,21 @@ public class RoleCardService {
 
     /**
      * 按角色卡渲染系统 Prompt。
+     * 拼接顺序：system.txt（破甲基底，所有角色通用） + role_system.txt（角色层，按 persona_card 渲染）。
+     * 当 roleId 为空（无角色 / 默认会话）时，只返回 system.txt。
      */
     public String buildSystemPrompt(Integer roleId) {
+        String base = promptService.getSystemPrompt();
         RoleCard role = roleId == null ? null : roleCardMapper.findById(roleId);
         if (role == null) {
-            return promptService.getSystemPrompt();
+            return base;
         }
 
         Map<String, String> vars = buildVarsFromRole(role);
-        return promptService.render("role_system.txt", vars);
+        String roleLayer = promptService.render("role_system.txt", vars);
+        // 双层拼接：base 在前定调"去除限制 / 不许自称 AI"，role_system 在后注入具体角色，
+        // 中间空一行让模型把它们当成一段连续的系统指令处理（实测比生硬拼更稳）。
+        return base + "\n\n" + roleLayer;
     }
 
     private Map<String, String> buildVarsFromRole(RoleCard role) {
@@ -80,6 +122,10 @@ public class RoleCardService {
         vars.put("background", nullToEmpty(role.getBackground()));
         vars.put("personality", nullToEmpty(role.getPersonality()));
         vars.put("exampleDialogue", nullToEmpty(role.getExampleDialogue()));
+        // 默认值（无 persona_card 时占位符给空字符串而不是 {{xxx}} 残留）
+        vars.put("aka", "");
+        vars.put("soulInjection", "");
+        vars.put("soulMantra", "");
 
         if (!StringUtils.hasText(role.getPersonaCardPath())) {
             return vars;
@@ -97,7 +143,17 @@ public class RoleCardService {
             overwriteIfText(root, "identity", vars, "profile");
             overwriteIfText(root, "background_oneliner", vars, "background");
 
-            // personality：合并 personality[] + speech_style + catchphrases[] + taboo[] + output_rules[]
+            // aka 别名：渲染成 "Shu / 黍姐 / 天师姐姐" 格式
+            String akaText = renderAka(root);
+            if (StringUtils.hasText(akaText)) {
+                vars.put("aka", akaText);
+            }
+
+            // 入魂指令 / 一句话铭印（角色专属行为细则）
+            overwriteIfText(root, "soul_injection", vars, "soulInjection");
+            overwriteIfText(root, "soul_mantra", vars, "soulMantra");
+
+            // personality：合并 personality[] + speech_style + catchphrases[] + taboo[] + output_rules[] + relationships
             String personalityBlock = renderPersonalityBlock(root);
             if (StringUtils.hasText(personalityBlock)) {
                 vars.put("personality", personalityBlock);
@@ -108,11 +164,26 @@ public class RoleCardService {
             if (StringUtils.hasText(dialogueBlock)) {
                 vars.put("exampleDialogue", dialogueBlock);
             }
-        } catch (Exception ignored) {
-            // 读取失败时保持数据库字段兜底，避免影响主流程
+        } catch (Exception e) {
+            log.warn("读取 persona_card 失败，回退数据库字段：path={}, err={}", role.getPersonaCardPath(), e.getMessage());
         }
 
         return vars;
+    }
+
+    private String renderAka(JsonNode root) {
+        JsonNode arr = root.get("aka");
+        if (arr == null || !arr.isArray() || arr.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < arr.size(); i++) {
+            String t = arr.get(i).asText("").trim();
+            if (t.isEmpty()) continue;
+            if (sb.length() > 0) sb.append(" / ");
+            sb.append(t);
+        }
+        return sb.toString();
     }
 
     /**
@@ -189,7 +260,21 @@ public class RoleCardService {
         return sb.toString().trim();
     }
 
+    /**
+     * 读取 persona_card.json：
+     *   1) 优先按 classpath 资源加载（推荐：personas/{roleCode}/persona_card.json，跟随 jar 一起发布）
+     *   2) classpath 找不到再回退到工作目录的相对/绝对路径（兼容历史的 data/processed/... 配置）
+     */
     private String readPersonaJson(String personaCardPath) throws IOException {
+        // 1) classpath
+        String cp = personaCardPath.startsWith("/") ? personaCardPath.substring(1) : personaCardPath;
+        Resource cpResource = new ClassPathResource(cp);
+        if (cpResource.exists()) {
+            try (InputStream in = cpResource.getInputStream()) {
+                return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            }
+        }
+        // 2) 文件系统兜底
         Path path = Path.of(personaCardPath);
         if (!path.isAbsolute()) {
             path = Path.of(System.getProperty("user.dir")).resolve(personaCardPath);
