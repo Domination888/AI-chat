@@ -43,3 +43,37 @@ my-neuro-main
 log/
 *.log
 *.log.gz
+
+### Client (Electron + Vue3) ###
+client/node_modules/
+client/dist/
+
+### Services ###
+services/gpt-sovits/GPT-SoVITS/
+*.ckpt
+*.pth
+*.wav
+*.pid
+
+### OS / Cache ###
+.DS_Store
+__pycache__/
+*.pyc
+
+### PIDs / Runtime state ###
+unified-logs/pids/
+*.pid
+
+### Model weights & training artifacts ###
+*.ckpt
+*.pth
+*.safetensors
+
+### Audio samples (large, not for repo) ###
+*.wav
+*.mp3
+*.flac
+
+### Misc ###
+LOG_HOME_IS_UNDEFINED/
+*.sql.bak

@@ -1,0 +1,20 @@
+{
+  "name": "ai-chat-electron",
+  "version": "1.0.0",
+  "description": "AI Chat Electron Client",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "electron .",
+    "build": "vite build",
+    "dev:vite": "vite",
+    "dev:electron": "wait-on http://localhost:3000 && electron ."
+  },
+  "dependencies": {
+    "electron": "^28.0.0"
+  },
+  "devDependencies": {
+    "vite": "^5.2.0",
+    "@vitejs/plugin-vue": "^5.0.4",
+    "wait-on": "^7.2.0"
+  }
+}

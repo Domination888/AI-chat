@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Electron Test</title>
+</head>
+<body>
+    <h1>Electron is working!</h1>
+    <p>Backend status: <span id="status">Checking...</span></p>
+    <script>
+        fetch('http://localhost:8080/api/health')
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('status').textContent = data.status;
+            })
+            .catch(e => {
+                document.getElementById('status').textContent = 'Error: ' + e.message;
+            });
+    </script>
+</body>
+</html>

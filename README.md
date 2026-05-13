@@ -1,10 +1,10 @@
-# AI 对话项目（二次元角色扮演）
+# AI 对话项目（二次元角色扮演）- Electron 客户端版
 
-把游戏剧情与角色台词搬进现实，选择角色卡，开口就能聊。
+把游戏剧情与角色台词搬进现实，选择角色卡，开口就能聊。现在支持桌面客户端！
 
 ## 技术栈
 
-- 前端：Vue3 + Vite + Element Plus + Nginx
+- 客户端：Electron + Vue3 + Vite + Element Plus
 - 后端：Spring Boot 3 + LangChain4j + MyBatis
 - LLM：本地 LM Studio（OpenAI 兼容协议）
 - ASR：本地 SenseVoice
@@ -12,17 +12,25 @@
 - 存储：MySQL（角色卡、会话、历史、长期记忆）+ Redis（短期记忆）
 - RAG：LangChain4j EmbeddingStore（角色台词与剧情向量化）
 
-## 目录结构
+## 新的目录结构
 
 ```
-.
-├── src/main/java/org/example/aichat   # 后端代码
-├── src/main/resources                 # application.yml / mapper / prompts / rag
-├── frontend/                          # Vue3 工程
-├── SenseVoice/                        # 本地 ASR 服务
-├── prime-mcp-server/                  # MCP 工具服务（可选）
-├── init.sql                           # 数据库一键初始化脚本
-└── 项目规范.md                         # 项目目标与功能说明
+AI-Chat/
+├── backend/                    # Spring Boot后端
+│   ├── src/
+│   ├── pom.xml
+│   └── ...
+├── client/                     # Electron客户端应用
+│   ├── electron/               # Electron主进程代码
+│   ├── src/                    # Vue3前端代码
+│   ├── package.json            # Electron应用配置
+│   └── ...
+├── services/                   # 独立服务
+│   ├── gpt-sovits/             # GPT-SoVITS服务
+│   ├── sense-voice/            # SenseVoice ASR服务
+│   └── prime-mcp-server/       # MCP工具服务
+├── docs/                       # 项目文档
+└── scripts/                    # 部署和构建脚本
 ```
 
 ## 快速开始
@@ -34,38 +42,113 @@
 | JDK | 17+ |
 | Maven | 用 `mvnw` 即可 |
 | Node | 18+ |
-| MySQL | 8.x，账号密码见 [`application-local.yml`](src/main/resources/application-local.yml) |
+| MySQL | 8.x，账号密码见 [`backend/src/main/resources/application-local.yml`](backend/src/main/resources/application-local.yml) |
 | Redis | 6+，本机 6379 |
 | LM Studio | 启动一个 chat 模型 + 一个 embedding 模型（默认端口 1234） |
-| SenseVoice | 见 [`SenseVoice/api.py`](SenseVoice/api.py) |
+| SenseVoice | 见 [`services/sense-voice/api.py`](services/sense-voice/api.py) |
 
 ### 2. 初始化数据库
 
 ```bash
-mysql -uroot -p < init.sql
+mysql -uroot -p < backend/init.sql
 ```
 
-### 3. 启动后端
+### 3. 一键启动开发环境
 
 ```bash
-./mvnw spring-boot:run
+# 启动完整的开发环境（后端 + 前端 + Electron）
+./run-dev.sh
+
+# 或者使用脚本（推荐）
+./scripts/start-dev.sh
 ```
 
-健康检查：`GET http://localhost:8080/api/health` 返回 `{"status":"UP",...}` 即骨架就绪。
+### 4. 手动启动（可选）
 
-### 4. 启动前端
+如果需要手动控制各个组件：
 
 ```bash
-cd frontend
-npm install
-npm run dev
+# 1. 启动后端
+cd backend && ./mvnw spring-boot:run
+
+# 2. 启动前端开发服务器
+cd client/src && npm run dev
+
+# 3. 启动Electron客户端
+cd client && npx electron .
 ```
 
-打开 `http://localhost:3000`，登录后即可选择角色聊天。
+### 5. 停止服务
 
-## 重构计划
+```bash
+./stop-dev.sh
+```
 
-详见 [`PLAN-001-ai-chat-role-play-refactor.md`](.joycode/plans/PLAN-001-ai-chat-role-play-refactor.md)，按阶段交付，每阶段都有可验证的里程碑。
+## 开发指南
+
+### Electron客户端开发
+
+客户端使用Electron + Vue3技术栈：
+
+1. **主进程代码**：`client/electron/main.js`
+2. **渲染进程代码**：`client/src/`（Vue3应用）
+3. **IPC通信**：通过`client/electron/preload.js`暴露API
+
+### 后端API
+
+后端提供RESTful API，客户端通过HTTP请求与后端通信。主要端点：
+
+- `GET /api/health` - 健康检查
+- `POST /api/chat` - 聊天接口
+- `GET /api/characters` - 获取角色列表
+- `POST /api/asr` - 语音识别
+- `POST /api/tts` - 文本转语音
+
+## 构建和部署
+
+### 开发环境
+```bash
+./run-dev.sh
+```
+
+### 生产构建
+```bash
+# 构建前端
+cd client/src && npm run build
+
+# 构建Electron应用
+cd client && npm run build:mac      # macOS
+cd client && npm run build:win     # Windows
+cd client && npm run build:linux   # Linux
+```
+
+## 重构说明
+
+本项目已从原来的单体结构重构为模块化结构：
+
+1. **分离关注点**：将前端、后端、服务分离到不同目录
+2. **Electron集成**：将Web应用升级为桌面客户端
+3. **更好的组织**：独立服务放在services目录中
+4. **简化部署**：提供统一的构建和启动脚本
+
+## 当前状态
+
+✅ **Electron客户端已成功集成并运行**
+- 前端代码已迁移到`client/src/`
+- Electron主进程已配置
+- 一键启动脚本已创建
+- macOS桌面应用已准备就绪
+
+## 常见问题
+
+### 白屏问题
+如果Electron窗口出现白屏，请检查：
+1. 后端服务是否正常运行（端口8080）
+2. 前端开发服务器是否正常运行（端口3000）
+3. 查看日志文件：`logs/backend.log`, `logs/frontend.log`, `logs/electron.log`
+
+### 端口冲突
+如果端口被占用，使用`./stop-dev.sh`停止所有服务，然后重新启动。
 
 ## License
 
