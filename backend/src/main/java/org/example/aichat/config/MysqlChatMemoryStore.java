@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.aichat.dto.History;
 import org.example.aichat.mapper.HistoryMapper;
+import org.example.aichat.util.EmotionTagNormalizer;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -81,9 +82,18 @@ public class MysqlChatMemoryStore implements ChatMemoryStore {
     // ==================== 转换方法 ====================
 
     private ChatMessage toChatMessage(History history) {
+        String content = history.getContent();
+        // 对 AI 消息规范化情绪标签：修复数据库中已入库的越界标签（如 <温和>）
+        if ("assistant".equals(history.getSender()) && content != null) {
+            String normalized = EmotionTagNormalizer.normalize(content);
+            if (!normalized.equals(content)) {
+                log.info("历史消息情绪标签规范化: conv={}, 原始含越界标签已修复", history.getConversationId());
+            }
+            content = normalized;
+        }
         return switch (history.getSender()) {
-            case "user" -> UserMessage.from(history.getContent());
-            case "assistant" -> AiMessage.from(history.getContent());
+            case "user" -> UserMessage.from(content);
+            case "assistant" -> AiMessage.from(content);
             default -> null;
         };
     }

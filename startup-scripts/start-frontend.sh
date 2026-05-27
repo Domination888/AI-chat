@@ -2,11 +2,13 @@
 
 # 启动前端服务
 
-LOG_DIR="unified-logs"
-PID_DIR="unified-logs/pids"
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+LOG_DIR="$PROJECT_ROOT/unified-logs"
+PID_DIR="$LOG_DIR/pids"
+PID_FILE="$PID_DIR/pids.txt"
 FRONTEND_PORT=3000
 
-mkdir -p $LOG_DIR/frontend $PID_DIR
+mkdir -p "$LOG_DIR/frontend" "$PID_DIR"
 
 # 检查端口并清理
 if lsof -ti:$FRONTEND_PORT >/dev/null; then
@@ -16,14 +18,17 @@ if lsof -ti:$FRONTEND_PORT >/dev/null; then
 fi
 
 echo "🎨 Starting Vite frontend server..."
-cd client/src
-npm run dev > ../../$LOG_DIR/frontend/app.log 2>&1 &
+cd "$PROJECT_ROOT/client/src"
+npm run dev > "$LOG_DIR/frontend/app.log" 2>&1 &
 FRONTEND_PID=$!
-cd ../..
+cd "$PROJECT_ROOT"
 
-# 保存PID
-echo $FRONTEND_PID > $PID_DIR/frontend.pid
-echo $FRONTEND_PID >> $PID_DIR/all_pids.txt
+# 保存PID（单一 pids.txt）
+if [ -f "$PID_FILE" ]; then
+    grep -v "^frontend " "$PID_FILE" > "$PID_FILE.tmp" || true
+    mv "$PID_FILE.tmp" "$PID_FILE"
+fi
+echo "frontend $FRONTEND_PID" >> "$PID_FILE"
 
 # 等待启动
 echo "⏳ Waiting for frontend to start..."

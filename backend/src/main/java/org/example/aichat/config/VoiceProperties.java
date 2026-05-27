@@ -26,7 +26,32 @@ public class VoiceProperties {
     private int asrTimeoutMs = 15000;
 
     // -------- TTS --------
+    /** TTS 引擎：gpt-sovits | mlx-audio，默认 gpt-sovits */
+    private String ttsEngine = "gpt-sovits";
+    /** GPT-SoVITS api_v2 基础 URL */
     private String ttsBaseUrl = "http://127.0.0.1:9880";
+    /** MLX-Audio API 基础 URL（OpenAI 兼容 /v1/audio/speech） */
+    private String mlxAudioBaseUrl = "http://127.0.0.1:9881";
+    /** MLX-Audio 使用的模型 ID */
+    private String mlxAudioModel = "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16";
+    /** MLX-Audio 输出采样率（Qwen3-TTS=24000，与 GPT-SoVITS v2Pro=48000 不同，前端需动态适配） */
+    private int mlxAudioSampleRate = 24000;
+    /**
+     * MLX-Audio 是否开启模型侧流式（stream=true）。
+     * 关闭时服务端会整段合成完毕才返回首字节，TTFB ≈ 整句耗时（长句可达 20s+）；
+     * 开启后首包约 0.8–1.5s（与 streamingInterval 有关）。
+     */
+    private boolean mlxAudioStream = true;
+    /** MLX-Audio streaming_interval（秒），越小首包越快，过小可能略损连贯性 */
+    private double mlxAudioStreamingInterval = 0.5;
+    /**
+     * true = 忽略 profile.ref_audio，改用 Qwen3 内置音色（测速 / 对比用）。
+     */
+    private boolean mlxAudioUsePresetVoice = false;
+    /** 内置音色名，如 Chelsie、Serena（见 mlx-audio config.yaml） */
+    private String mlxAudioPresetVoice = "Chelsie";
+    /** 启动时向 MLX-Audio 预热各 profile 的 ref_audio（需 server_entry.py 缓存） */
+    private boolean mlxAudioWarmOnStart = true;
     private boolean ttsAutoSwitchWeights = true;
     private int ttsStreamingMode = 2;
     private int ttsTimeoutMs = 60000;

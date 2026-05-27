@@ -2,39 +2,42 @@
 
 # AI-Chat 完整开发环境停止脚本
 
-PID_DIR="unified-logs/pids"
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PID_DIR="$PROJECT_ROOT/unified-logs/pids"
+PID_FILE="$PID_DIR/pids.txt"
 
 echo "🛑 Stopping AI-Chat Development Environment..."
 
-# 检查PID文件是否存在
-if [ ! -f "$PID_DIR/all_pids.txt" ]; then
-    echo "⚠️  No PID file found. Attempting to kill by ports..."
-    
-    # 按端口杀死进程
-    ports=(8080 3000 9000 9880)
-    for port in "${ports[@]}"; do
-        if lsof -ti:$port >/dev/null; then
-            echo "🔍 Killing processes on port $port..."
-            lsof -ti:$port | xargs kill -9 2>/dev/null || true
-        fi
-    done
-    
-    # 杀死可能的Electron进程
-    pkill -f "electron" 2>/dev/null || true
-    pkill -f "electron.app" 2>/dev/null || true
-    
-    echo "✅ All services stopped by port."
-else
-    # 从PID文件杀死进程
-    echo "🔍 Killing processes from PID file..."
-    cat "$PID_DIR/all_pids.txt" | xargs kill -9 2>/dev/null || true
-    rm -f "$PID_DIR/all_pids.txt"
-    rm -f "$PID_DIR/service_pids.txt"
-    echo "✅ All services stopped by PID."
+# 1) 优先用 TTS 自带的停止脚本
+TTS_STOP="$PROJECT_ROOT/services/gpt-sovits/start.sh"
+if [ -f "$TTS_STOP" ]; then
+    echo "🔊 Stopping TTS via start.sh stop..."
+    bash "$TTS_STOP" stop 2>/dev/null || true
 fi
 
-echo "🧹 Cleaning up log files..."
-# 可选：清理日志文件
-# rm -f unified-logs/*/*.log
+# 2) 从 PID 文件杀进程
+if [ -f "$PID_FILE" ]; then
+    echo "🔍 Killing processes from PID file..."
+    awk '{print $2}' "$PID_FILE" | xargs kill 2>/dev/null || true
+    rm -f "$PID_FILE"
+    # 等待进程优雅退出
+    sleep 2
+fi
+
+# 3) 按端口兜底杀进程
+# 停止 MLX-Audio TTS
+MLX_TTS_STOP="$PROJECT_ROOT/services/mlx-audio-tts/stop.sh"
+if [ -f "$MLX_TTS_STOP" ]; then
+    echo "Stopping MLX-Audio TTS..."
+    bash "$MLX_TTS_STOP" 2>/dev/null || true
+fi
+
+ports=(8080 3000 9000 9880 9881)
+for port in "${ports[@]}"; do
+    if lsof -ti:$port >/dev/null 2>&1; then
+        echo "🔍 Killing processes on port $port..."
+        lsof -ti:$port | xargs kill 2>/dev/null || true
+    fi
+done
 
 echo "✅ AI-Chat Development Environment has been stopped."

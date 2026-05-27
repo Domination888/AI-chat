@@ -2,20 +2,25 @@
 
 # 启动Electron客户端
 
-LOG_DIR="unified-logs"
-PID_DIR="unified-logs/pids"
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+LOG_DIR="$PROJECT_ROOT/unified-logs"
+PID_DIR="$LOG_DIR/pids"
+PID_FILE="$PID_DIR/pids.txt"
 
-mkdir -p $LOG_DIR/client $PID_DIR
+mkdir -p "$LOG_DIR/client" "$PID_DIR"
 
 echo "🖥️  Starting Electron client..."
-cd client
-npx electron . > ../$LOG_DIR/client/app.log 2>&1 &
+cd "$PROJECT_ROOT/client"
+npx electron . > "$LOG_DIR/client/app.log" 2>&1 &
 CLIENT_PID=$!
-cd ..
+cd "$PROJECT_ROOT"
 
-# 保存PID
-echo $CLIENT_PID > $PID_DIR/client.pid
-echo $CLIENT_PID >> $PID_DIR/all_pids.txt
+# 保存PID（单一 pids.txt）
+if [ -f "$PID_FILE" ]; then
+	grep -v "^electron " "$PID_FILE" > "$PID_FILE.tmp" || true
+	mv "$PID_FILE.tmp" "$PID_FILE"
+fi
+echo "electron $CLIENT_PID" >> "$PID_FILE"
 
 echo "✅ Electron client is starting..."
 echo "📊 Logs: $LOG_DIR/client/app.log"

@@ -15,7 +15,7 @@ import java.time.Duration;
 
 /**
  * LLM / Embedding 客户端配置
- * 所有连接信息都在 application-local.yml（llm.* / embedding.*）里，严禁硬编码。
+ * Bean 级别使用 yml 默认值初始化；运行时动态配置由 LlmProperties 管理。
  * 规则：LLM 必须走 Win LM Studio（唯一有 NVIDIA GPU 的节点）。
  */
 @Configuration

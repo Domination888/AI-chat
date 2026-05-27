@@ -1,17 +1,17 @@
 <template>
-  <div class="flex h-screen overflow-hidden bg-white text-gray-800">
+  <div class="flex h-screen overflow-hidden bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100">
     <!-- Login Overlay -->
-    <div v-if="!user" class="absolute inset-0 z-50 flex items-center justify-center bg-gray-50">
-      <div class="bg-white p-8 rounded-xl shadow-md w-full max-w-sm border border-gray-100">
-        <h2 class="text-2xl font-bold mb-6 text-center text-gray-800">登录 AI Chat</h2>
+    <div v-if="!user" class="absolute inset-0 z-50 flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+      <div class="bg-white dark:bg-gray-800 p-8 rounded-xl shadow-md w-full max-w-sm border border-gray-100 dark:border-gray-700">
+        <h2 class="text-2xl font-bold mb-6 text-center text-gray-800 dark:text-gray-100">登录 AI Chat</h2>
         <div class="space-y-4">
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">用户名</label>
-            <input v-model="loginForm.username" type="text" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500" placeholder="任意用户名(自动注册)" />
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">用户名</label>
+            <input v-model="loginForm.username" type="text" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-gray-100" placeholder="任意用户名(自动注册)" />
           </div>
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">密码</label>
-            <input v-model="loginForm.password" type="password" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500" @keydown.enter="doLogin" placeholder="请输入密码" />
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">密码</label>
+            <input v-model="loginForm.password" type="password" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-gray-100" @keydown.enter="doLogin" placeholder="请输入密码" />
           </div>
           <p v-if="loginError" class="text-red-500 text-sm">{{ loginError }}</p>
           <button @click="doLogin" :disabled="isLoggingIn" class="w-full py-2 px-4 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition disabled:opacity-50 mt-4">
@@ -22,13 +22,13 @@
     </div>
 
     <!-- Sidebar -->
-    <div class="w-64 bg-gray-50 border-r flex flex-col hidden md:flex">
-      <div class="p-4 border-b space-y-3">
+    <div class="w-64 bg-gray-50 dark:bg-gray-800 border-r dark:border-gray-700 flex flex-col hidden md:flex">
+      <div class="p-4 border-b dark:border-gray-700 space-y-3">
         <!-- Role Selector -->
         <div>
           <button 
             @click="showRoleSelector = true"
-            class="w-full flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition text-sm"
+            class="w-full flex items-center gap-2 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600 transition text-sm"
           >
             <div class="w-6 h-6 rounded-full bg-gradient-to-br from-pink-400 to-purple-500 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
               {{ selectedRole?.name?.charAt(0) || '?' }}
@@ -39,7 +39,7 @@
             </svg>
           </button>
         </div>
-        <button @click="newChat" class="w-full flex items-center justify-center gap-2 bg-white border border-gray-300 rounded-md py-2 px-4 hover:bg-gray-50 transition">
+        <button @click="newChat" class="w-full flex items-center justify-center gap-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md py-2 px-4 hover:bg-gray-50 dark:hover:bg-gray-600 transition">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
             <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
           </svg>
@@ -50,7 +50,7 @@
         <div v-for="conv in conversations" :key="conv.id"
              @click="selectConversation(conv.id)"
              class="group flex items-center justify-between px-3 py-3 text-sm rounded-md cursor-pointer transition-colors overflow-hidden"
-             :class="currentConversationId === conv.id ? 'bg-blue-100 text-blue-700 font-medium' : 'hover:bg-gray-200 text-gray-700'">
+             :class="currentConversationId === conv.id ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200 font-medium' : 'hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300'">
             <span class="truncate block flex-1">{{ conv.title || '新对话' }}</span>
             <button @click.stop="deleteConversation(conv.id)" title="删除对话" class="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity ml-2 shrink-0">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -60,18 +60,18 @@
         </div>
       </div>
       <!-- User profile block at bottom of sidebar -->
-      <div class="p-4 border-t">
+      <div class="p-4 border-t dark:border-gray-700">
         <div class="flex items-center gap-2 overflow-hidden mb-2">
           <div class="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center font-bold flex-shrink-0">
             {{ user?.username?.charAt(0).toUpperCase() }}
           </div>
-          <div class="text-sm font-medium truncate">{{ user?.username }}</div>
+          <div class="text-sm font-medium truncate dark:text-gray-200">{{ user?.username }}</div>
         </div>
         <div class="flex gap-2">
-          <button @click="openSettings" class="flex-1 text-xs border border-gray-300 rounded-md py-1.5 hover:bg-gray-50 transition">
+          <button @click="openSettings" class="flex-1 text-xs border border-gray-300 dark:border-gray-600 rounded-md py-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition">
             ⚙️ 设置
           </button>
-          <button @click="logout" class="flex-1 text-xs text-gray-500 hover:text-red-500 border border-gray-300 rounded-md py-1.5 transition">
+          <button @click="logout" class="flex-1 text-xs text-gray-500 dark:text-gray-400 hover:text-red-500 border border-gray-300 dark:border-gray-600 rounded-md py-1.5 transition">
             退出
           </button>
         </div>
@@ -79,25 +79,25 @@
     </div>
 
     <!-- Main Chat Area -->
-    <div class="flex-1 flex flex-col relative">
+    <div class="flex-1 flex flex-col relative min-h-0">
       <!-- Header -->
-      <div class="h-14 border-b flex items-center px-4 justify-between bg-white md:hidden">
+      <div class="h-14 border-b dark:border-gray-700 flex items-center px-4 justify-between bg-white dark:bg-gray-800 md:hidden">
         <button 
           @click="showRoleSelector = true"
-          class="flex items-center gap-1.5 text-sm text-gray-700"
+          class="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300"
         >
           <div class="w-6 h-6 rounded-full bg-gradient-to-br from-pink-400 to-purple-500 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
             {{ selectedRole?.name?.charAt(0) || '?' }}
           </div>
           <span class="truncate max-w-[120px]">{{ selectedRole?.name || '选择角色' }}</span>
         </button>
-        <div v-if="user" @click="logout" class="text-xs text-gray-500 cursor-pointer shrink-0 ml-4">退出</div>
+        <div v-if="user" @click="logout" class="text-xs text-gray-500 dark:text-gray-400 cursor-pointer shrink-0 ml-4">退出</div>
       </div>
 
       <!-- Messages List -->
-      <div class="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 no-scrollbar pb-[280px]" id="chat-container">
-        <div v-if="messages.length === 0" class="h-full flex flex-col items-center justify-center text-gray-400">
-          <div class="text-4xl mb-4 text-gray-300">👋</div>
+      <div class="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 no-scrollbar min-h-0" id="chat-container">
+        <div v-if="messages.length === 0" class="h-full flex flex-col items-center justify-center text-gray-400 dark:text-gray-500">
+          <div class="text-4xl mb-4 text-gray-300 dark:text-gray-600">👋</div>
           <h2 class="text-xl font-semibold mb-2">有什么我可以帮您的？</h2>
           <p class="text-sm mb-1">现在正在使用体验角色：<span class="text-blue-500 font-bold">{{ selectedRole?.name || '未知角色' }}</span></p>
           <p class="text-xs">按住麦克风说话，使用声音沟通！</p>
@@ -111,10 +111,10 @@
           </div>
           <!-- Bubble -->
           <div class="max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed"
-               :class="msg.role === 'user' ? 'bg-blue-100 text-blue-900 rounded-tr-sm' : 'bg-gray-100 text-gray-800 rounded-tl-sm'">
+               :class="msg.role === 'user' ? 'bg-blue-100 dark:bg-blue-900 text-blue-900 dark:text-blue-100 rounded-tr-sm' : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100 rounded-tl-sm'">
             
             <div v-if="msg.images && msg.images.length > 0" class="flex flex-wrap gap-2 mb-2">
-              <img v-for="(img, idx) in msg.images" :key="idx" :src="img" class="max-w-[200px] max-h-[200px] rounded-md object-cover border border-gray-200" />
+              <img v-for="(img, idx) in msg.images" :key="idx" :src="img" class="max-w-[200px] max-h-[200px] rounded-md object-cover border border-gray-200 dark:border-gray-600" />
             </div>
             
             <div v-if="msg.isAudio" class="flex items-center gap-2 mb-2 text-pink-600 font-bold">
@@ -126,7 +126,7 @@
 
             <div style="white-space: pre-wrap; word-wrap: break-word;">{{ msg.content }}</div>
             
-            <button v-if="msg.audioUrl && msg.role === 'ai'" @click="playAudio(msg.audioUrl)" class="mt-2 text-xs bg-pink-100 hover:bg-pink-200 text-pink-700 py-1 px-2 rounded flex items-center gap-1 transition">
+            <button v-if="msg.audioUrl && msg.role === 'ai'" @click="playAudio(msg.audioUrl)" class="mt-2 text-xs bg-pink-100 dark:bg-pink-900 hover:bg-pink-200 dark:hover:bg-pink-800 text-pink-700 dark:text-pink-300 py-1 px-2 rounded flex items-center gap-1 transition">
               ▶ 播放语音
             </button>
           </div>
@@ -134,12 +134,12 @@
       </div>
 
       <!-- Input Area -->
-      <div class="absolute bottom-0 left-0 right-0 bg-white pt-4 pb-6 px-4 md:px-8 border-t border-gray-100">
+      <div class="bg-white dark:bg-gray-800 pt-4 pb-6 px-4 md:px-8 border-t border-gray-100 dark:border-gray-700 flex-shrink-0">
         <div class="max-w-3xl mx-auto flex flex-col gap-2">
           
           <div class="flex items-center justify-between px-2">
             <div class="flex items-center gap-2">
-              <button @click="toggleVoiceMode" class="text-xs px-3 py-1 rounded-full transition" :class="isVoiceMode ? 'bg-pink-500 text-white' : 'bg-gray-200 text-gray-600'">
+              <button @click="toggleVoiceMode" class="text-xs px-3 py-1 rounded-full transition" :class="isVoiceMode ? 'bg-pink-500 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300'">
                 {{ isVoiceMode ? '🎙️ 按住说话模式' : '⌨️ 键盘输入模式' }}
               </button>
               <!-- 自动解锁：默认隐藏；仅在浏览器还没解锁自动播放时作为兜底 -->
@@ -156,7 +156,7 @@
               <!-- Web Search：联网搜索（智谱 Web Search MCP），默认关闭，由用户手动开启 -->
               <label class="flex items-center cursor-pointer select-none" title="联网搜索（智谱 Web Search MCP）">
                 <span class="mr-2 text-xs font-medium transition-colors"
-                      :class="useSearch ? 'text-emerald-600' : 'text-gray-500'">联网</span>
+                      :class="useSearch ? 'text-emerald-600' : 'text-gray-500 dark:text-gray-400'">联网</span>
                 <button type="button"
                         @click.prevent="toggleSearch"
                         class="relative w-10 h-5 rounded-full transition-colors duration-200"
@@ -168,7 +168,7 @@
             </div>
           </div>
 
-          <div class="relative flex flex-col border border-gray-300 bg-white rounded-xl shadow-sm overflow-hidden focus-within:ring-1 focus-within:ring-blue-500 focus-within:border-blue-500 min-h-[56px] justify-center text-center">
+          <div class="relative flex flex-col border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-xl shadow-sm overflow-hidden focus-within:ring-1 focus-within:ring-blue-500 focus-within:border-blue-500 min-h-[56px] justify-center text-center">
             
             <template v-if="isVoiceMode">
               <button 
@@ -177,8 +177,8 @@
                 @mouseleave.prevent="stopRecording"
                 @touchstart.prevent="startRecording"
                 @touchend.prevent="stopRecording"
-                class="w-full py-4 font-bold text-gray-700 transition"
-                :class="isRecording ? 'bg-pink-100 text-pink-600' : 'hover:bg-gray-50'"
+                class="w-full py-4 font-bold text-gray-700 dark:text-gray-200 transition"
+                :class="isRecording ? 'bg-pink-100 dark:bg-pink-900 text-pink-600 dark:text-pink-300' : 'hover:bg-gray-50 dark:hover:bg-gray-600'"
                 :disabled="loading"
               >
                 {{ isRecording ? '🔊 松手发送...' : '按住 说话' }}
@@ -186,15 +186,15 @@
             </template>
             
             <template v-else>
-              <div v-if="selectedImages.length > 0" class="flex flex-wrap gap-2 p-3 bg-gray-50 border-b border-gray-100">
+              <div v-if="selectedImages.length > 0" class="flex flex-wrap gap-2 p-3 bg-gray-50 dark:bg-gray-600 border-b border-gray-100 dark:border-gray-700">
                 <div v-for="(img, idx) in selectedImages" :key="idx" class="relative group">
-                  <img :src="img" class="w-16 h-16 object-cover rounded-md border border-gray-200" />
+                  <img :src="img" class="w-16 h-16 object-cover rounded-md border border-gray-200 dark:border-gray-500" />
                   <button @click="removeImage(idx)" class="absolute -top-2 -right-2 bg-gray-800 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition shadow-sm">x</button>
                 </div>
               </div>
               <div class="flex items-end relative">
                 <input type="file" ref="fileInput" @change="handleImageUpload" accept="image/*" multiple class="hidden" />
-                <button @click="$refs.fileInput.click()" class="h-10 w-10 flex items-center justify-center text-gray-400 hover:text-blue-500 transition mb-[8px] ml-2 shrink-0">
+                <button @click="$refs.fileInput.click()" class="h-10 w-10 flex items-center justify-center text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition mb-[8px] ml-2 shrink-0">
                   <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
@@ -210,7 +210,7 @@
                   @click="sendMessage"
                   :disabled="loading || (!inputRaw.trim() && selectedImages.length === 0)"
                   class="absolute right-2 bottom-3 w-8 h-8 flex items-center justify-center rounded-lg text-white transition disabled:opacity-50"
-                  :class="(inputRaw.trim() || selectedImages.length > 0) && !loading ? 'bg-blue-500 hover:bg-blue-600' : 'bg-gray-300'"
+                  :class="(inputRaw.trim() || selectedImages.length > 0) && !loading ? 'bg-blue-500 hover:bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                     <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
@@ -235,7 +235,7 @@
   
   <!-- 角色选择器模态框 -->
   <div v-if="showRoleSelector" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-    <div class="bg-white rounded-xl shadow-lg w-full max-w-4xl mx-4 max-h-[80vh] overflow-hidden">
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg w-full max-w-4xl mx-4 max-h-[80vh] overflow-hidden">
       <RoleCardSelector 
         :roles="roles"
         :selected-role-id="selectedRole?.id || null"
@@ -244,6 +244,9 @@
       />
     </div>
   </div>
+
+  <!-- Live2D 黍模型 -->
+  <Live2DCanvas />
 </template>
 
 <script setup>
@@ -251,6 +254,8 @@ import { ref, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import SettingsModal from './components/SettingsModal.vue'
 import RoleCardSelector from './components/RoleCardSelector.vue'
+import Live2DCanvas from './components/Live2DCanvas.vue'
+import { live2dController } from './live2d/live2d-controller.js'
 
 const inputRaw = ref('')
 const messages = ref([])
@@ -318,7 +323,10 @@ const settings = ref({
   ttsSpeed: 1.0,
   ttsPitch: 1.0,
   autoPlayTts: true,
-  darkMode: false
+  darkMode: false,
+  proactiveChatEnabled: true,
+  proactiveIdleSeconds: 30,
+  proactivePrompt: '[System: 用户长时间未说话，请根据上下文主动搭话，自然地延续对话]'
 })
 
 const doLogin = async () => {
@@ -350,6 +358,7 @@ const doLogin = async () => {
 }
 
 const logout = () => {
+  unregisterProactiveChat()
   user.value = null
   localStorage.removeItem('chat_user')
   messages.value = []
@@ -392,6 +401,8 @@ const loadConversations = async () => {
 }
 
 const selectConversation = async (id) => {
+  // 切换会话前先注销旧的 proactive
+  await unregisterProactiveChat()
   currentConversationId.value = id
   try {
     const res = await fetch(`/api/conversation/${id}/history`)
@@ -401,15 +412,20 @@ const selectConversation = async (id) => {
       role: h.sender === 'assistant' ? 'ai' : h.sender,
       content: h.content || ''
     }))
+    scrollToBottom()
   } catch (e) {
     console.error('加载对话消息失败', e)
     messages.value = []
   }
+  // 切换后重新注册 proactive
+  registerProactiveChat()
 }
 
 const newChat = async () => {
+  await unregisterProactiveChat()
   currentConversationId.value = `conv_${Date.now()}`
   messages.value = []
+  registerProactiveChat()
 }
 
 const deleteConversation = async (id) => {
@@ -442,23 +458,43 @@ onMounted(() => {
       console.error('解析用户信息失败', e)
     }
   }
+  // 从 localStorage 恢复设置，重启后自动生效
+  restoreSettings()
+  // 根据深色模式设置应用样式
+  applyDarkMode(settings.value.darkMode)
   document.addEventListener('mousedown', unlockAudioSync)
   document.addEventListener('touchstart', unlockAudioSync, true)
   document.addEventListener('mousedown', globalUnlock)
   document.addEventListener('touchstart', globalUnlock, true)
+
+  // 监听 Live2D 子窗口的点击互动事件，触发主动说话
+  if (window.electronAPI && window.electronAPI.onLive2dInteract) {
+    window.electronAPI.onLive2dInteract(() => {
+      triggerProactiveFromInteract()
+    })
+  }
 })
 
 const scrollToBottom = async () => {
   await nextTick()
+  await nextTick()
   const container = document.getElementById('chat-container')
-  if (container) container.scrollTop = container.scrollHeight
+  if (container) {
+    container.scrollTop = container.scrollHeight
+  }
 }
 
 const sendMessage = async (e) => {
   if (e && e.shiftKey) return
   const text = inputRaw.value.trim()
   const hasImages = selectedImages.value.length > 0
-  if ((!text && !hasImages) || loading.value) return
+  if ((!text && !hasImages)) return
+
+  // 如果正在生成，先打断当前对话
+  if (loading.value) {
+    await abortCurrentChat()
+    loading.value = false
+  }
 
   const currentImages = [...selectedImages.value]
   inputRaw.value = ''
@@ -472,54 +508,26 @@ const sendMessage = async (e) => {
   loading.value = true
 
   const requestBody = {
+    inputMode: 'text',
     userId: String(user.value.id),
     conversationId: currentConversationId.value,
     message: text,
     images: currentImages.length > 0 ? currentImages : null,
     stream: true,
     search: useSearch.value,
-    rag: true,                       // RAG 默认常开（PLAN-001），保证角色设定 + 长期记忆准确
-    tools: true,                     // 本地 MCP 工具默认常开（Gemma4 原生支持 tool-call）
+    rag: true,                       // RAG 默认常开
+    tools: true,                     // 本地 MCP 工具默认常开
     roleId: selectedRole.value ? selectedRole.value.id : 1,
-    // 模型配置（如果启用了自定义模型）
-    ...(settings.value.modelBaseUrl && settings.value.modelName ? {
-      modelBaseUrl: settings.value.modelBaseUrl,
-      modelName: settings.value.modelName
+    // TTS 回播：只要角色配置了 voiceId 就附带（文字/语音输入都走 TTS）
+    ...(selectedRole.value?.voiceId ? {
+      ttsVoiceId: selectedRole.value.voiceId,
+      ttsSpeedFactor: settings.value.ttsSpeed || 1.0,
+      ttsPitchFactor: settings.value.ttsPitch || 1.0
     } : {})
   }
 
   try {
-    const response = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody)
-    })
-    if (!response.ok) throw new Error("HTTP error!")
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder('utf-8')
-    let buffer = ''
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      let events = buffer.split(/\r?\n\r?\n/)
-      buffer = events.pop() || '' 
-      for (const event of events) {
-        if (!event.trim()) continue
-        const lines = event.split(/\r?\n/)
-        let eventData = []
-        for (const line of lines) {
-          if (line.startsWith('data:')) {
-            let text = line.substring(5)
-            if (text.startsWith(' ')) text = text.substring(1)
-            eventData.push(text)
-          }
-        }
-        if (!eventData.length) continue
-        messages.value[aiMsgIndex].content += eventData.join('')
-        scrollToBottom()
-      }
-    }
+    await doChatSSE(requestBody, null, aiMsgIndex)
     if (messages.value.length <= 3) await loadConversations()
   } catch (error) {
     console.error(error)
@@ -571,6 +579,9 @@ const audioUnlocked = ref(false)  // AudioContext 是否已 resume
 let audioCtx = null               // 全局唯一 AudioContext
 let currentSource = null          // 正在播放的 BufferSource（用于停止）
 const ttsBuffers = new Map()      // idx -> { chunks: Uint8Array[] }
+/** MLX 流式 PCM：按 AudioContext 时间轴无缝拼接，避免 8KB 分片断档/爆音 */
+const ttsStreamPlayers = new Map() // idx -> { nextTime, carry, ... }
+let currentAbortController = null  // 当前 SSE 请求的 AbortController（用于打断）
 
 /**
  * 获取/创建全局 AudioContext。
@@ -629,13 +640,126 @@ const forceEnableAudio = () => {
   }
 }
 
+const decodeTtsChunkBytes = (audioBase64) => {
+  const bin = atob(audioBase64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return bytes
+}
+
+const enqueueTtsAudio = (idx, pcm, buf) => {
+  audioQueue.push({
+    idx,
+    pcm,
+    sampleRate: buf.sampleRate,
+    channels: buf.channels,
+    format: buf.format,
+  })
+  pumpAudioQueue()
+}
+
+const stopTtsStreamPlayer = (idx) => {
+  const player = ttsStreamPlayers.get(idx)
+  if (!player) return
+  if (player.stopTimer) clearTimeout(player.stopTimer)
+  for (const src of player.activeSources) {
+    try { src.stop() } catch (e) { /* already stopped */ }
+  }
+  ttsStreamPlayers.delete(idx)
+}
+
+/**
+ * MLX 流式 PCM：在 AudioContext 时间轴上连续 schedule，保证样本边界对齐。
+ * 不可把每个 HTTP/SSE 分片当成独立 BufferSource 排队（会断档，且奇数字节会爆音）。
+ */
+const feedStreamPcm = (idx, bytes, buf) => {
+  const ctx = getAudioCtx()
+  if (!ctx) return
+  if (ctx.state !== 'running') return
+
+  let player = ttsStreamPlayers.get(idx)
+  if (!player) {
+    player = {
+      sampleRate: buf.sampleRate,
+      channels: buf.channels || 1,
+      nextTime: ctx.currentTime + 0.02,
+      carry: null,
+      lipSyncStarted: false,
+      activeSources: [],
+      stopTimer: null,
+    }
+    ttsStreamPlayers.set(idx, player)
+  }
+
+  let merged = bytes
+  if (player.carry !== null) {
+    const joined = new Uint8Array(1 + bytes.length)
+    joined[0] = player.carry
+    joined.set(bytes, 1)
+    merged = joined
+    player.carry = null
+  }
+
+  if (merged.length & 1) {
+    player.carry = merged[merged.length - 1]
+  }
+  const alignedLen = merged.length & ~1
+  if (alignedLen < 2) return
+
+  const pcm = merged.subarray(0, alignedLen)
+  const audioBuf = pcmInt16ToAudioBuffer(ctx, pcm, player.sampleRate, player.channels)
+  const src = ctx.createBufferSource()
+  src.buffer = audioBuf
+  src.connect(ctx.destination)
+
+  if (player.nextTime < ctx.currentTime) {
+    player.nextTime = ctx.currentTime
+  }
+  src.start(player.nextTime)
+  player.nextTime += audioBuf.duration
+  player.activeSources.push(src)
+
+  if (!player.lipSyncStarted) {
+    player.lipSyncStarted = true
+    live2dController.startLipSync(ctx, src)
+  }
+
+  src.onended = () => {
+    const i = player.activeSources.indexOf(src)
+    if (i >= 0) player.activeSources.splice(i, 1)
+  }
+}
+
+const finishTtsStreamPlayer = (idx) => {
+  const player = ttsStreamPlayers.get(idx)
+  if (!player) return
+  if (player.carry !== null) {
+    feedStreamPcm(idx, new Uint8Array([player.carry, 0]), {
+      sampleRate: player.sampleRate,
+      channels: player.channels,
+    })
+    player.carry = null
+  }
+  const ctx = getAudioCtx()
+  const delayMs = ctx
+    ? Math.max(50, (player.nextTime - ctx.currentTime) * 1000 + 50)
+    : 50
+  player.stopTimer = setTimeout(() => {
+    if (ttsStreamPlayers.get(idx) === player) {
+      live2dController.stopLipSync()
+      ttsStreamPlayers.delete(idx)
+    }
+  }, delayMs)
+}
+
 const handleTtsEvent = (payload) => {
   const idx = payload.idx
   if (payload.chunkStart) {
     ttsBuffers.set(idx, {
       sampleRate: payload.sampleRate || 48000,
       channels: payload.channels || 1,
-      format: payload.format || 's16le',
+      format: payload.format || 'pcm_s16le',
+      streamPlay: !!payload.streamPlay,
       chunks: []
     })
   }
@@ -643,15 +767,22 @@ const handleTtsEvent = (payload) => {
   if (!buf) return
   if (payload.audioBase64) {
     try {
-      const bin = atob(payload.audioBase64)
-      const bytes = new Uint8Array(bin.length)
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-      buf.chunks.push(bytes)
+      const bytes = decodeTtsChunkBytes(payload.audioBase64)
+      if (buf.streamPlay && buf.format === 'pcm_s16le') {
+        feedStreamPcm(idx, bytes, buf)
+      } else {
+        buf.chunks.push(bytes)
+      }
     } catch (e) {
       console.error('audio chunk 解码失败', e)
     }
   }
   if (payload.chunkEnd) {
+    if (buf.streamPlay) {
+      finishTtsStreamPlayer(idx)
+      ttsBuffers.delete(idx)
+      return
+    }
     if (buf.chunks.length === 0) {
       ttsBuffers.delete(idx)
       return
@@ -662,14 +793,7 @@ const handleTtsEvent = (payload) => {
     let off = 0
     for (const c of buf.chunks) { merged.set(c, off); off += c.length }
     ttsBuffers.delete(idx)
-    audioQueue.push({
-      idx,
-      pcm: merged,
-      sampleRate: buf.sampleRate,
-      channels: buf.channels,
-      format: buf.format,
-    })
-    pumpAudioQueue()
+    enqueueTtsAudio(idx, merged, buf)
   }
 }
 
@@ -701,30 +825,191 @@ const pumpAudioQueue = () => {
   if (!item) return
   audioPlaying = true
   try {
-    const audioBuf = pcmInt16ToAudioBuffer(ctx, item.pcm, item.sampleRate, item.channels)
-    const src = ctx.createBufferSource()
-    src.buffer = audioBuf
-    src.connect(ctx.destination)
-    currentSource = src
-    src.onended = () => {
-      currentSource = null
-      audioPlaying = false
-      pumpAudioQueue()
+    // WAV 格式（MLX-Audio 引擎）：走 decodeAudioData 解码
+    // pcm_s16le 格式（GPT-SoVITS 引擎）：直接灌 AudioBuffer，零解码开销
+    const decodeAndPlay = (audioBuf) => {
+      const src = ctx.createBufferSource()
+      src.buffer = audioBuf
+      src.connect(ctx.destination)
+      currentSource = src
+      // TTS 播放时启动 Live2D 口型同步
+      live2dController.startLipSync(ctx, src)
+      src.onended = () => {
+        currentSource = null
+        audioPlaying = false
+        live2dController.stopLipSync()
+        pumpAudioQueue()
+      }
+      src.start(0)
     }
-    src.start(0)
+
+    if (item.format === 'wav') {
+      // MLX-Audio 返回完整 WAV，用 decodeAudioData 解码
+      ctx.decodeAudioData(item.pcm.buffer.slice(item.pcm.byteOffset, item.pcm.byteOffset + item.pcm.byteLength))
+        .then(decodeAndPlay)
+        .catch(e => {
+          console.warn('WAV 解码失败 idx=' + item.idx + ':', e && e.message)
+          audioPlaying = false
+          live2dController.stopLipSync()
+          pumpAudioQueue()
+        })
+    } else {
+      // raw PCM (pcm_s16le)：直接灌 AudioBuffer
+      const audioBuf = pcmInt16ToAudioBuffer(ctx, item.pcm, item.sampleRate, item.channels)
+      decodeAndPlay(audioBuf)
+    }
   } catch (e) {
     console.warn('PCM 播放失败 idx=' + item.idx + ':', e && e.message)
     audioPlaying = false
+    live2dController.stopLipSync()
     pumpAudioQueue()
   }
 }
 
 
+/**
+ * 停止当前 TTS 音频播放：停止 source + 清空 audioQueue + 重置 audioPlaying
+ */
+const stopCurrentAudio = () => {
+  if (currentSource) {
+    try { currentSource.stop() } catch (e) { /* already stopped */ }
+    currentSource = null
+  }
+  audioPlaying = false
+  audioQueue.length = 0
+  ttsBuffers.clear()
+  for (const idx of [...ttsStreamPlayers.keys()]) {
+    stopTtsStreamPlayer(idx)
+  }
+  live2dController.stopLipSync()
+}
+
+/**
+ * 打断当前正在进行的聊天（SSE 流 + TTS 播放）：
+ * ① 调后端 /api/chat/interrupt 通知后端停止 LLM 生成
+ * ② 用 AbortController 取消当前 fetch SSE 流
+ * ③ 清空音频队列 + 停止当前播放
+ * ④ 清理当前 AI 消息气泡（保留已收到文本或标记 [已打断]）
+ */
+const abortCurrentChat = async () => {
+  // 1. 通知后端打断
+  if (currentConversationId.value) {
+    try {
+      await fetch('/api/chat/interrupt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId: currentConversationId.value })
+      })
+    } catch (e) {
+      console.warn('interrupt 请求失败', e)
+    }
+  }
+
+  // 2. 取消当前 SSE fetch
+  if (currentAbortController) {
+    currentAbortController.abort()
+    currentAbortController = null
+  }
+
+  // 3. 停止 TTS 播放 + 清空队列
+  stopCurrentAudio()
+
+  // 4. 标记当前 AI 消息为 [已打断]（仅当内容为空时）
+  const lastMsg = messages.value[messages.value.length - 1]
+  if (lastMsg && lastMsg.role === 'ai' && !lastMsg.content) {
+    lastMsg.content = '[已打断]'
+  }
+}
+
 // ============================================================
-// 流式语音对话：ASR → LLM(token 流) → 句子级 TTS → 串行播放
+// 流式对话（统一入口）：语音/文本都走 POST /api/chat
 // SSE 事件：asr / text / tts / done / error
 // ============================================================
+
+/**
+ * 公共 SSE 流式对话处理
+ * @param requestBody ChatRequest JSON body
+ * @param userMsgIndex 用户消息在 messages 数组中的 index（语音输入时需要 ASR 回填，传 null 则跳过）
+ * @param aiMsgIndex AI 消息在 messages 数组中的 index
+ */
+const doChatSSE = async (requestBody, userMsgIndex, aiMsgIndex) => {
+  // 创建 AbortController 支持请求级打断
+  const controller = new AbortController()
+  currentAbortController = controller
+
+  const response = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(requestBody),
+    signal: controller.signal
+  })
+  if (!response.ok || !response.body) throw new Error('HTTP error')
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+  try {
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const events = buffer.split(/\r?\n\r?\n/)
+    buffer = events.pop() || ''
+    for (const ev of events) {
+      if (!ev.trim()) continue
+      // 解析 SSE: event: <name>  + data: <json>
+      let evName = 'message'
+      const dataLines = []
+      for (const line of ev.split(/\r?\n/)) {
+        if (line.startsWith('event:')) evName = line.substring(6).trim()
+        else if (line.startsWith('data:')) {
+          let t = line.substring(5)
+          if (t.startsWith(' ')) t = t.substring(1)
+          dataLines.push(t)
+        }
+      }
+      if (!dataLines.length) continue
+      let payload = {}
+      try { payload = JSON.parse(dataLines.join('\n')) } catch { payload = {} }
+
+      if (evName === 'asr' && userMsgIndex !== null) {
+        // 语音输入：ASR 回填用户消息
+        messages.value[userMsgIndex].content = payload.text || ''
+        messages.value[userMsgIndex].isAudio = false
+      } else if (evName === 'emotion') {
+        // 情绪标签事件：驱动 Live2D 表情/动作
+        live2dController.triggerEmotion(payload.emotion)
+      } else if (evName === 'text') {
+        messages.value[aiMsgIndex].content += (payload.delta || '')
+        scrollToBottom()
+      } else if (evName === 'tts') {
+        handleTtsEvent(payload)
+      } else if (evName === 'error') {
+        messages.value[aiMsgIndex].content += `\n[错误] ${payload.message || ''}`
+      } else if (evName === 'done') {
+        // 流结束：延迟恢复默认表情
+        live2dController.onConversationEnd()
+      }
+    }
+  }
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      // 被 abortCurrentChat 打断，优雅退出
+      console.log('SSE 流被打断')
+      return
+    }
+    throw e
+  } finally {
+    currentAbortController = null
+  }
+}
+
 const sendAudio = async (audioBlob) => {
+  // 如果正在生成，先打断当前对话
+  if (loading.value) {
+    await abortCurrentChat()
+    loading.value = false
+  }
   loading.value = true
 
   // 占位：用户气泡（ASR 文本回填后替换）
@@ -734,71 +1019,28 @@ const sendAudio = async (audioBlob) => {
   messages.value.push({ role: 'ai', content: '' })
   scrollToBottom()
 
-  const formData = new FormData()
-  formData.append('file', audioBlob, 'record.webm')
-  formData.append('conversationId', currentConversationId.value)
-  formData.append('roleId', selectedRole.value ? selectedRole.value.id : 1)
-  formData.append('voiceId', selectedRole.value?.voiceId || '')
-  formData.append('userId', user.value.id)
-  formData.append('asrService', settings.value.asrService || 'sensevoice')
-  formData.append('asrLanguage', settings.value.asrLanguage || 'zh')
-  formData.append('ttsSpeed', settings.value.ttsSpeed.toString() || '1.0')
-  formData.append('ttsPitch', settings.value.ttsPitch.toString() || '1.0')
-  // 添加模型配置（如果启用了自定义模型）
-  if (settings.value.modelBaseUrl && settings.value.modelName) {
-    formData.append('modelBaseUrl', settings.value.modelBaseUrl)
-    formData.append('modelName', settings.value.modelName)
+  // 将 audioBlob 转为 base64
+  const audioBase64 = await blobToBase64(audioBlob)
+
+  const requestBody = {
+    inputMode: 'audio',
+    userId: String(user.value.id),
+    conversationId: currentConversationId.value,
+    audioBase64: audioBase64,
+    audioFormat: 'webm',
+    roleId: selectedRole.value ? selectedRole.value.id : 1,
+    search: useSearch.value,
+    rag: true,
+    tools: true,
+    asrLanguage: settings.value.asrLanguage || 'zh',
+    asrHotwords: '',
+    ttsVoiceId: selectedRole.value?.voiceId || '',
+    ttsSpeedFactor: settings.value.ttsSpeed || 1.0,
+    ttsPitchFactor: settings.value.ttsPitch || 1.0
   }
 
   try {
-    const response = await fetch('/api/audio/chat-stream', {
-      method: 'POST',
-      body: formData,
-      headers: { 'Accept': 'text/event-stream' }
-    })
-    if (!response.ok || !response.body) throw new Error('HTTP error')
-
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder('utf-8')
-    let buffer = ''
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const events = buffer.split(/\r?\n\r?\n/)
-      buffer = events.pop() || ''
-      for (const ev of events) {
-        if (!ev.trim()) continue
-        // 解析 SSE: event: <name>  + data: <json>
-        let evName = 'message'
-        const dataLines = []
-        for (const line of ev.split(/\r?\n/)) {
-          if (line.startsWith('event:')) evName = line.substring(6).trim()
-          else if (line.startsWith('data:')) {
-            let t = line.substring(5)
-            if (t.startsWith(' ')) t = t.substring(1)
-            dataLines.push(t)
-          }
-        }
-        if (!dataLines.length) continue
-        let payload = {}
-        try { payload = JSON.parse(dataLines.join('\n')) } catch { payload = {} }
-
-        if (evName === 'asr') {
-          messages.value[userMsgIndex].content = payload.text || ''
-          messages.value[userMsgIndex].isAudio = false
-        } else if (evName === 'text') {
-          messages.value[aiMsgIndex].content += (payload.delta || '')
-          scrollToBottom()
-        } else if (evName === 'tts') {
-          handleTtsEvent(payload)
-        } else if (evName === 'error') {
-          messages.value[aiMsgIndex].content += `\n[错误] ${payload.message || ''}`
-        } else if (evName === 'done') {
-          // 流结束，啥也不做
-        }
-      }
-    }
+    await doChatSSE(requestBody, userMsgIndex, aiMsgIndex)
     if (messages.value.length <= 3) await loadConversations()
   } catch (error) {
     console.error(error)
@@ -808,6 +1050,23 @@ const sendAudio = async (audioBlob) => {
   } finally {
     loading.value = false
   }
+}
+
+/**
+ * Blob 转 base64 字符串（不含 data:xxx;base64, 前缀）
+ */
+const blobToBase64 = (blob) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      const dataUrl = reader.result
+      // 去掉 "data:audio/webm;base64," 前缀
+      const base64 = dataUrl.split(',')[1]
+      resolve(base64)
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(blob)
+  })
 }
 
 const playAudio = (url) => {
@@ -820,15 +1079,62 @@ const openSettings = () => {
   showSettings.value = true
 }
 
-const handleSettingsSave = (newSettings) => {
+/** 从 localStorage 恢复设置（页面重启后自动生效） */
+const restoreSettings = () => {
+  const saved = localStorage.getItem('appSettings')
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved)
+      settings.value = { ...settings.value, ...parsed }
+    } catch (e) {
+      console.error('恢复设置失败', e)
+    }
+  }
+}
+
+/** 应用深色模式：给 <html> 添加/移除 dark class（配合 Tailwind dark: 前缀） */
+const applyDarkMode = (isDark) => {
+  if (isDark) {
+    document.documentElement.classList.add('dark')
+  } else {
+    document.documentElement.classList.remove('dark')
+  }
+}
+
+const handleSettingsSave = async (newSettings) => {
   settings.value = { ...newSettings }
   // 保存到localStorage
   localStorage.setItem('appSettings', JSON.stringify(settings.value))
+  // 实时应用深色模式
+  applyDarkMode(settings.value.darkMode)
+  // 同步 LLM 配置到后端（热加载）
+  if (settings.value.modelBaseUrl || settings.value.modelName) {
+    try {
+      await fetch('/api/llm-config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          baseUrl: settings.value.modelBaseUrl || undefined,
+          modelName: settings.value.modelName || undefined
+        })
+      })
+    } catch (e) {
+      console.warn('同步 LLM 配置到后端失败', e)
+    }
+  }
   ElMessage.success('设置已保存')
+  // 如果 proactive 配置变更，重新注册
+  if (currentConversationId.value && user.value) {
+    if (settings.value.proactiveChatEnabled) {
+      registerProactiveChat()
+    } else {
+      unregisterProactiveChat()
+    }
+  }
 }
 
-// 加载设置
-const loadSettings = () => {
+// 加载设置（从后端 + localStorage）
+const loadSettings = async () => {
   const savedSettings = localStorage.getItem('appSettings')
   if (savedSettings) {
     try {
@@ -837,11 +1143,22 @@ const loadSettings = () => {
       console.error('加载设置失败', e)
     }
   }
+  // 从后端获取当前生效的 LLM 配置（覆盖 localStorage 的值）
+  try {
+    const res = await fetch('/api/llm-config')
+    if (res.ok) {
+      const config = await res.json()
+      settings.value.modelBaseUrl = config.baseUrl || null
+      settings.value.modelName = config.modelName || null
+    }
+  } catch (e) {
+    // 后端不可用，保持 localStorage 值
+  }
 }
 
 // 在登录后初始化设置
 const initDataAfterLogin = async () => {
-  loadSettings()
+  await loadSettings()
   await loadRoles()
   // loadConversations 依赖 selectedRole，先确保角色已选中
   if (!selectedRole.value && roles.value.length > 0) {
@@ -853,6 +1170,155 @@ const initDataAfterLogin = async () => {
   } else {
     newChat()
   }
+}
+
+// ============================================================
+// 主动搭话（Proactive Chat）
+// ============================================================
+
+let proactiveEventSource = null  // SSE 长连接引用
+
+/**
+ * 注册主动搭话：调后端注册 + 开启 SSE 长连接监听
+ */
+
+/**
+ * 点击 Live2D 模型互动时触发主动说话
+ * 调用后端 /api/chat/proactive/trigger 接口，跳过空闲检查直接触发一次主动搭话
+ */
+const triggerProactiveFromInteract = async () => {
+  if (!currentConversationId.value || !user.value) return
+  if (!settings.value.proactiveChatEnabled) return
+  try {
+    await fetch('/api/chat/proactive/trigger', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversationId: currentConversationId.value })
+    })
+  } catch (e) {
+    console.warn('触发互动主动说话失败', e)
+  }
+}
+
+/**
+ * 注册主动搭话：调后端注册 + 开启 SSE 长连接监听
+ */
+const registerProactiveChat = async () => {
+  if (!settings.value.proactiveChatEnabled) return
+  if (!currentConversationId.value || !user.value) return
+
+  const roleId = selectedRole.value ? selectedRole.value.id : 1
+
+  // 1. 调后端注册
+  try {
+    await fetch('/api/chat/proactive', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        conversationId: currentConversationId.value,
+        userId: String(user.value.id),
+        roleId: roleId,
+        idleSeconds: settings.value.proactiveIdleSeconds,
+        proactivePrompt: settings.value.proactivePrompt
+      })
+    })
+  } catch (e) {
+    console.warn('注册主动搭话失败', e)
+    return
+  }
+
+  // 2. 关闭旧的 SSE 长连接
+  closeProactiveEventSource()
+
+  // 3. 开启新的 SSE 长连接
+  const url = `/api/chat/proactive/stream?conversationId=${encodeURIComponent(currentConversationId.value)}`
+  proactiveEventSource = new EventSource(url)
+
+  proactiveEventSource.addEventListener('proactive', (e) => {
+    // 收到主动搭话标记 → 在消息列表中新增 AI 消息
+    const aiMsgIndex = messages.value.length
+    messages.value.push({ role: 'ai', content: '', isProactive: true })
+    scrollToBottom()
+    // 把当前 aiMsgIndex 关联到 proactive 会话
+    proactiveAiMsgIndex = aiMsgIndex
+  })
+
+  proactiveEventSource.addEventListener('text', (e) => {
+    // 主动搭话的文本 delta
+    let payload = {}
+    try { payload = JSON.parse(e.data) } catch {}
+    if (proactiveAiMsgIndex !== null && payload.delta) {
+      messages.value[proactiveAiMsgIndex].content += payload.delta
+      scrollToBottom()
+    }
+  })
+
+  proactiveEventSource.addEventListener('emotion', (e) => {
+    // 主动搭话的情绪标签事件：驱动 Live2D 表情/动作
+    let payload = {}
+    try { payload = JSON.parse(e.data) } catch {}
+    live2dController.triggerEmotion(payload.emotion)
+  })
+
+  proactiveEventSource.addEventListener('tts', (e) => {
+    // 主动搭话的 TTS 事件（如果后端支持）
+    let payload = {}
+    try { payload = JSON.parse(e.data) } catch {}
+    handleTtsEvent(payload)
+  })
+
+  proactiveEventSource.addEventListener('done', (e) => {
+    // 主动搭话完成
+    proactiveAiMsgIndex = null
+    live2dController.onConversationEnd()
+  })
+
+  proactiveEventSource.addEventListener('interrupted', (e) => {
+    // 主动搭话被打断
+    if (proactiveAiMsgIndex !== null && !messages.value[proactiveAiMsgIndex]?.content) {
+      messages.value[proactiveAiMsgIndex].content = '[已打断]'
+    }
+    proactiveAiMsgIndex = null
+  })
+
+  proactiveEventSource.addEventListener('error', (e) => {
+    let payload = {}
+    try { payload = JSON.parse(e.data) } catch {}
+    console.warn('主动搭话错误', payload.message)
+    proactiveAiMsgIndex = null
+  })
+
+  proactiveEventSource.onerror = () => {
+    // SSE 连接断开，尝试重连（EventSource 会自动重连）
+    console.log('主动搭话 SSE 连接断开，将自动重连')
+  }
+}
+
+let proactiveAiMsgIndex = null  // 当前主动搭话的 AI 消息 index
+
+/**
+ * 注销主动搭话：调后端注销 + 关闭 SSE 长连接
+ */
+const unregisterProactiveChat = async () => {
+  if (!currentConversationId.value) return
+  closeProactiveEventSource()
+  try {
+    await fetch('/api/chat/proactive', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversationId: currentConversationId.value })
+    })
+  } catch (e) {
+    console.warn('注销主动搭话失败', e)
+  }
+}
+
+const closeProactiveEventSource = () => {
+  if (proactiveEventSource) {
+    proactiveEventSource.close()
+    proactiveEventSource = null
+  }
+  proactiveAiMsgIndex = null
 }
 </script>
 

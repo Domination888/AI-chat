@@ -39,10 +39,10 @@ frontend/.vite/
 
 my-neuro-main
 
-### Runtime logs (logback-spring.xml writes module logs here) ###
-log/
-*.log
-*.log.gz
+### Runtime logs (logback-spring.xml writes to unified-logs/) ###
+unified-logs/**/*.log
+unified-logs/**/*.log.gz
+LOG_HOME_IS_UNDEFINED/
 
 ### Client (Electron + Vue3) ###
 client/node_modules/
@@ -53,7 +53,6 @@ services/gpt-sovits/GPT-SoVITS/
 *.ckpt
 *.pth
 *.wav
-*.pid
 
 ### OS / Cache ###
 .DS_Store
@@ -75,5 +74,7 @@ unified-logs/pids/
 *.flac
 
 ### Misc ###
-LOG_HOME_IS_UNDEFINED/
 *.sql.bak
+
+### 学习项目 ###
+my-neuro

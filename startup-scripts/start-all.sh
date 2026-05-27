@@ -5,12 +5,17 @@
 
 set -e
 
-LOG_DIR="unified-logs"
-PID_DIR="unified-logs/pids"
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+LOG_DIR="$PROJECT_ROOT/unified-logs"
+PID_DIR="$LOG_DIR/pids"
+PID_FILE="$PID_DIR/pids.txt"
 
 # 创建日志目录
-mkdir -p $LOG_DIR/{backend,frontend,client,electron,asr,tts,prompt}
-mkdir -p $PID_DIR
+mkdir -p "$LOG_DIR"/{backend,frontend,client,electron,asr,tts}
+mkdir -p "$PID_DIR"
+
+# 启动前清空 pids.txt，避免历史残留 PID 越积越多
+> "$PID_FILE"
 
 echo "🚀 Starting AI-Chat Complete Development Environment..."
 
@@ -18,9 +23,9 @@ echo "🚀 Starting AI-Chat Complete Development Environment..."
 cleanup() {
     echo ""
     echo "🛑 Stopping all services..."
-    if [ -f "$PID_DIR/all_pids.txt" ]; then
-        cat "$PID_DIR/all_pids.txt" | xargs kill -9 2>/dev/null || true
-        rm -f "$PID_DIR/all_pids.txt"
+    if [ -f "$PID_FILE" ]; then
+        awk '{print $2}' "$PID_FILE" | xargs kill -9 2>/dev/null || true
+        rm -f "$PID_FILE"
     fi
     echo "✅ All services stopped."
     exit 0
@@ -66,11 +71,10 @@ start_backend() {
     check_and_kill_port 8080
     
     echo "📦 Starting Spring Boot backend..."
-    cd backend
-    ./mvnw spring-boot:run > ../$LOG_DIR/backend/app.log 2>&1 &
+    cd "$PROJECT_ROOT/backend"
+    ./mvnw spring-boot:run > "$LOG_DIR/backend/app.log" 2>&1 &
     BACKEND_PID=$!
-    cd ..
-    echo $BACKEND_PID >> $PID_DIR/all_pids.txt
+    cd "$PROJECT_ROOT"
     
     if ! check_service "http://localhost:8080/api/health" "Backend"; then
         echo "❌ Backend failed to start. Check $LOG_DIR/backend/app.log"
@@ -83,11 +87,10 @@ start_frontend() {
     check_and_kill_port 3000
     
     echo "🎨 Starting Vite frontend server..."
-    cd client/src
-    npm run dev > ../../$LOG_DIR/frontend/app.log 2>&1 &
+    cd "$PROJECT_ROOT/client/src"
+    npm run dev > "$LOG_DIR/frontend/app.log" 2>&1 &
     FRONTEND_PID=$!
-    cd ../..
-    echo $FRONTEND_PID >> $PID_DIR/all_pids.txt
+    cd "$PROJECT_ROOT"
     
     if ! check_service "http://localhost:3000" "Frontend"; then
         echo "❌ Frontend failed to start. Check $LOG_DIR/frontend/app.log"
@@ -98,11 +101,10 @@ start_frontend() {
 # 启动Electron客户端
 start_client() {
     echo "🖥️  Starting Electron client..."
-    cd client
-    npx electron . > ../$LOG_DIR/client/app.log 2>&1 &
+    cd "$PROJECT_ROOT/client"
+    npx electron . > "$LOG_DIR/client/app.log" 2>&1 &
     ELECTRON_PID=$!
-    cd ..
-    echo $ELECTRON_PID >> $PID_DIR/all_pids.txt
+    cd "$PROJECT_ROOT"
     echo "✅ Electron client is starting..."
 }
 
@@ -111,11 +113,10 @@ start_asr() {
     check_and_kill_port 9000
     
     echo "🎤 Starting SenseVoice ASR service..."
-    cd services/sense-voice
-    python server.py > ../../$LOG_DIR/asr/app.log 2>&1 &
+    cd "$PROJECT_ROOT/services/sense-voice"
+    python server.py > "$LOG_DIR/asr/app.log" 2>&1 &
     ASR_PID=$!
-    cd ../..
-    echo $ASR_PID >> $PID_DIR/all_pids.txt
+    cd "$PROJECT_ROOT"
     
     if ! check_service "http://localhost:9000/healthz" "ASR Service"; then
         echo "❌ ASR service failed to start. Check $LOG_DIR/asr/app.log"
@@ -125,20 +126,35 @@ start_asr() {
 
 # 启动TTS服务
 start_tts() {
-    check_and_kill_port 9880
-    
-    echo "🔊 Starting GPT-SoVITS TTS service..."
-    cd services/gpt-sovits
-    # 这里需要根据实际TTS启动命令调整
-    if [ -f "start.sh" ]; then
-        bash start.sh > ../../$LOG_DIR/tts/app.log 2>&1 &
-        TTS_PID=$!
-        echo $TTS_PID >> ../../$PID_DIR/all_pids.txt
-        echo "✅ TTS service is starting..."
-    else
-        echo "⚠️  TTS start script not found. Skipping TTS service."
+    # 从 application-local.yml 读取 tts-engine 配置
+    local tts_engine="gpt-sovits"
+    local config_file="$PROJECT_ROOT/backend/src/main/resources/application-local.yml"
+    if [ -f "$config_file" ]; then
+        local engine_line=$(grep -E '^\s*tts-engine:' "$config_file" 2>/dev/null | head -1)
+        if [ -n "$engine_line" ]; then
+            tts_engine=$(echo "$engine_line" | sed 's/.*tts-engine:[[:space:]]*//' | tr -d '"' | tr -d "'")
+        fi
     fi
-    cd ../..
+
+    echo "🔊 Starting TTS service (engine=$tts_engine)..."
+    local tts_script="$PROJECT_ROOT/startup-scripts/start-tts.sh"
+    if [ -f "$tts_script" ]; then
+        bash "$tts_script" --engine "$tts_engine"
+        # 根据引擎选择端口
+        local tts_port=9880
+        if [ "$tts_engine" = "mlx-audio" ]; then
+            tts_port=9881
+        fi
+        TTS_PID=$(lsof -i :$tts_port -sTCP:LISTEN -t 2>/dev/null | head -1 || true)
+        if [ -n "$TTS_PID" ]; then
+            echo "✅ TTS service is running on port $tts_port (engine=$tts_engine, PID: $TTS_PID)"
+        else
+            echo "⚠️  TTS port $tts_port not yet listening, may still be loading..."
+        fi
+    else
+        echo "⚠️  TTS start script not found: $tts_script"
+        echo "   Skipping TTS service."
+    fi
 }
 
 # 显示状态信息
@@ -148,7 +164,7 @@ show_status() {
     echo "📱 Frontend: http://localhost:3000"
     echo "🔧 Backend: http://localhost:8080/api/health"
     echo "🎤 ASR: http://localhost:9000/healthz"
-    echo "🔊 TTS: http://localhost:9880 (if configured)"
+    echo "🔊 TTS: http://localhost:9880/9881 (engine-dependent)"
     echo "🖥️  Electron: Desktop app should appear"
     echo ""
     echo "📊 Unified Logs Location: $LOG_DIR/"
@@ -156,19 +172,29 @@ show_status() {
     echo "   Frontend: $LOG_DIR/frontend/app.log"
     echo "   Client: $LOG_DIR/client/app.log"
     echo "   ASR: $LOG_DIR/asr/app.log"
-    echo "   TTS: $LOG_DIR/tts/app.log"
+    echo "   TTS: $LOG_DIR/tts/gpt-sovits.log / $LOG_DIR/tts/mlx-audio/server.log"
     echo ""
-    echo "🛑 To stop all services: Press Ctrl+C or run kill \$(cat $PID_DIR/all_pids.txt)"
+    echo "🛑 To stop all services: Press Ctrl+C or run kill \$(awk '{print \$2}' $PID_FILE)"
     echo "   Or use: ./startup-scripts/stop-all.sh"
 }
 
-# 保存PID
+upsert_pid() {
+    local name="$1"
+    local pid="$2"
+    [ -z "$pid" ] && return 0
+    if [ -f "$PID_FILE" ]; then
+        grep -v "^$name " "$PID_FILE" > "$PID_FILE.tmp" || true
+        mv "$PID_FILE.tmp" "$PID_FILE"
+    fi
+    echo "$name $pid" >> "$PID_FILE"
+}
+
+# 保存PID（统一写入 pids.txt，避免重复）
 save_pids() {
-    echo "Backend PID: $BACKEND_PID" > $PID_DIR/service_pids.txt
-    echo "Frontend PID: $FRONTEND_PID" >> $PID_DIR/service_pids.txt
-    echo "Electron PID: $ELECTRON_PID" >> $PID_DIR/service_pids.txt
-    echo "ASR PID: $ASR_PID" >> $PID_DIR/service_pids.txt
-    [ -n "$TTS_PID" ] && echo "TTS PID: $TTS_PID" >> $PID_DIR/service_pids.txt
+    upsert_pid "backend" "$BACKEND_PID"
+    upsert_pid "frontend" "$FRONTEND_PID"
+    upsert_pid "electron" "$ELECTRON_PID"
+    upsert_pid "asr" "$ASR_PID"
 }
 
 # 主流程

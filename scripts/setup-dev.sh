@@ -1,27 +1,41 @@
 #!/bin/bash
 
-echo "Setting up AI-Chat Development Environment..."
+# AI-Chat 开发环境初始化脚本
+# 一次性安装所有依赖
+
+set -e
+
+echo "🔧 Setting up AI-Chat Development Environment..."
 
 # 安装后端依赖
-echo "Installing backend dependencies..."
+echo "📦 Installing backend dependencies (Maven)..."
 cd backend
 ./mvnw dependency:resolve
 cd ..
 
-# 安装客户端依赖
-echo "Installing client dependencies..."
+# 安装前端依赖 (client/src 下有独立的 package.json)
+echo "📦 Installing frontend dependencies (client/src)..."
 cd client/src
 npm install
 cd ../..
 
-# 安装Electron依赖
-echo "Installing Electron dependencies..."
+# 安装 Electron 客户端依赖 (client 根目录)
+echo "📦 Installing Electron client dependencies (client)..."
 cd client
-npm install electron --save-dev
+npm install
 cd ..
 
-echo "Setup completed!"
+# 检查 ASR 依赖
+echo "📦 Checking ASR dependencies..."
+if [ -f "services/sense-voice/requirements.txt" ]; then
+    pip3 install -r services/sense-voice/requirements.txt 2>/dev/null || \
+        echo "⚠️  ASR Python 依赖安装失败，可能需要手动安装"
+fi
+
+echo ""
+echo "✅ Setup completed!"
+echo ""
 echo "To start development:"
-echo "1. Start backend: cd backend && ./mvnw spring-boot:run"
-echo "2. Start frontend: cd client/src && npm run dev"
-echo "3. Start Electron: cd client && npx electron ."
+echo "  ./startup-scripts/start-all.sh           # 启动所有服务"
+echo "  ./startup-scripts/start-backend.sh       # 只启动后端"
+echo "  ./startup-scripts/start-frontend.sh      # 只启动前端"

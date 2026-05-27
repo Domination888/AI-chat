@@ -2,11 +2,13 @@
 
 # 启动ASR服务
 
-LOG_DIR="unified-logs"
-PID_DIR="unified-logs/pids"
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+LOG_DIR="$PROJECT_ROOT/unified-logs"
+PID_DIR="$LOG_DIR/pids"
+PID_FILE="$PID_DIR/pids.txt"
 ASR_PORT=9000
 
-mkdir -p $LOG_DIR/asr $PID_DIR
+mkdir -p "$LOG_DIR/asr" "$PID_DIR"
 
 # 检查端口并清理
 if lsof -ti:$ASR_PORT >/dev/null; then
@@ -16,14 +18,17 @@ if lsof -ti:$ASR_PORT >/dev/null; then
 fi
 
 echo "🎤 Starting SenseVoice ASR service..."
-cd services/sense-voice
-python server.py > ../../$LOG_DIR/asr/app.log 2>&1 &
+cd "$PROJECT_ROOT/services/sense-voice"
+python server.py > "$LOG_DIR/asr/app.log" 2>&1 &
 ASR_PID=$!
-cd ../..
+cd "$PROJECT_ROOT"
 
-# 保存PID
-echo $ASR_PID > $PID_DIR/asr.pid
-echo $ASR_PID >> $PID_DIR/all_pids.txt
+# 保存PID（单一 pids.txt）
+if [ -f "$PID_FILE" ]; then
+    grep -v "^asr " "$PID_FILE" > "$PID_FILE.tmp" || true
+    mv "$PID_FILE.tmp" "$PID_FILE"
+fi
+echo "asr $ASR_PID" >> "$PID_FILE"
 
 # 等待启动
 echo "⏳ Waiting for ASR service to start..."

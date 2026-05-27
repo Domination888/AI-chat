@@ -52,8 +52,8 @@ rag:
 llm:
   # Win 机 LM Studio (Gemma4-31B Dense, GGUF Q4/Q5, ctx_len=8192)，OpenAI 兼容；规则强约束：LLM 必须走 Win
   # 上下文长度策略：后端自管 prompt 装配，发到 LLM 的 token 控制在 7K 内，LM Studio 侧 ctx_len 配 8K 即可（不要拉到 256K）
-  base-url: http://192.168.124.2:1234/v1
-  model-name: gemma-4-31b-it
+  base-url: http://127.0.0.1:1234/v1
+  model-name: gemma4-e4b
   streaming-model-name: gemma-4-31b-it
   # 连接超时给短一点，连不上秒失败；读超时给大模型留够吐字时间
   connect-timeout-ms: 3000
@@ -73,9 +73,26 @@ voice:
   asr-url: http://127.0.0.1:9000/v1/audio/transcriptions
   asr-language: auto
   asr-timeout-ms: 15000
-  # ---------------- TTS (GPT-SoVITS api_v2) ----------------
-  # base-url 指向本机 GPT-SoVITS api_v2 (推荐 9880)
+  # ---------------- TTS 引擎 ----------------
+  # 引擎选择：gpt-sovits | mlx-audio（默认，Qwen3-TTS + MLX 原生加速）
+  tts-engine: gpt-sovits
+  # GPT-SoVITS api_v2 base-url（端口 9880）
   tts-base-url: http://127.0.0.1:9880
+  # MLX-Audio API base-url（端口 9881，OpenAI 兼容 /v1/audio/speech）
+  mlx-audio-base-url: http://127.0.0.1:9881
+  # MLX-Audio 模型 ID
+  mlx-audio-model: mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16
+  # MLX-Audio 输出采样率（Qwen3-TTS=24000，GPT-SoVITS v2Pro=48000，前端需动态适配）
+  mlx-audio-sample-rate: 24000
+  # MLX 模型侧流式：false 时 TTFB≈整句合成时间；true 时首包约 1–2s（克隆参考音）
+  mlx-audio-stream: true
+  # 每段音频时长（秒）；越小首包越快，过小可能略损连贯性
+  mlx-audio-streaming-interval: 0.5
+  # false=黍 ref_audio 克隆；true=内置音色（仅测速）
+  mlx-audio-use-preset-voice: false
+  mlx-audio-preset-voice: Chelsie
+  # 后端启动时 POST /v1/audio/warm-voice 预热参考音缓存
+  mlx-audio-warm-on-start: true
   # 首次调用前是否自动尝试切换一次权重（只切一次，避免每次请求都切）
   tts-auto-switch-weights: true
   # 流式块大小：1=最高音质（不流式）/ 2=中等（流式，不强切）/ 3=最快（流式 + 定长硬切，会断词）
@@ -90,15 +107,17 @@ voice:
     shu:
       display-name: "黍（默认）"
       # 参考音频：绝对路径，GPT-SoVITS 服务端读取本机文件
-      ref-audio-path: ${user.dir}/v4/黍/reference_audios/中文/emotions/【默认】让我看看我带来的这些渔具放到哪里好呢？.wav
+      # 路径指向 GPT-SoVITS 服务进程能访问到的本机绝对路径
+      # 后端启动时 user.dir = .../AI-chat/backend，因此用 ../services/gpt-sovits/v4/... 回到项目根再进 services
+      ref-audio-path: ${user.dir}/../services/gpt-sovits/v4/黍/reference_audios/中文/emotions/【默认】让我看看我带来的这些渔具放到哪里好呢？.wav
       prompt-text: "让我看看我带来的这些渔具放到哪里好呢？"
       prompt-lang: zh
       text-lang: zh
       # 训练出来的 GPT / SoVITS 权重（绝对路径），后端启动后会调用 /set_gpt_weights & /set_sovits_weights 切换
       # 注意：当前 GPT-SoVITS 服务侧的底模是 v2Pro（见 GPT-SoVITS/GPT_SoVITS/configs/tts_infer.yaml），
       # 黍的 v4 LoRA 权重直接挂到 v2Pro 底模上跑，速度快很多（详见 PLAN-007）
-      gpt-weights: ${user.dir}/v4/黍/黍-e10.ckpt
-      sovits-weights: ${user.dir}/v4/黍/黍_e10_s190_l32.pth
+      gpt-weights: ${user.dir}/../services/gpt-sovits/v4/黍/黍-e10.ckpt
+      sovits-weights: ${user.dir}/../services/gpt-sovits/v4/黍/黍_e10_s190_l32.pth
       # 推理参数严格对齐 GPT-SoVITS webui "1C-推理" 页设置（详见 .joycode/memory/feedback_tts_params.md）
       # webui 截图实测：top_k=15, top_p=1, temperature=1, 语速=1, 句间停顿=0.3, 采样步数=8, 切分=凑四句一切
       top-k: 15

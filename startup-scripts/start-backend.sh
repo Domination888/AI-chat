@@ -2,11 +2,13 @@
 
 # 启动后端服务
 
-LOG_DIR="unified-logs"
-PID_DIR="unified-logs/pids"
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+LOG_DIR="$PROJECT_ROOT/unified-logs"
+PID_DIR="$LOG_DIR/pids"
+PID_FILE="$PID_DIR/pids.txt"
 BACKEND_PORT=8080
 
-mkdir -p $LOG_DIR/backend $PID_DIR
+mkdir -p "$LOG_DIR/backend" "$PID_DIR"
 
 # 检查端口并清理
 if lsof -ti:$BACKEND_PORT >/dev/null; then
@@ -16,14 +18,17 @@ if lsof -ti:$BACKEND_PORT >/dev/null; then
 fi
 
 echo "📦 Starting Spring Boot backend..."
-cd backend
-./mvnw spring-boot:run > ../$LOG_DIR/backend/app.log 2>&1 &
+cd "$PROJECT_ROOT/backend"
+./mvnw spring-boot:run > "$LOG_DIR/backend/app.log" 2>&1 &
 BACKEND_PID=$!
-cd ..
+cd "$PROJECT_ROOT"
 
-# 保存PID
-echo $BACKEND_PID > $PID_DIR/backend.pid
-echo $BACKEND_PID >> $PID_DIR/all_pids.txt
+# 保存PID（单一 pids.txt）
+if [ -f "$PID_FILE" ]; then
+    grep -v "^backend " "$PID_FILE" > "$PID_FILE.tmp" || true
+    mv "$PID_FILE.tmp" "$PID_FILE"
+fi
+echo "backend $BACKEND_PID" >> "$PID_FILE"
 
 # 等待启动
 echo "⏳ Waiting for backend to start..."

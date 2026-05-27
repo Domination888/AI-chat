@@ -1,47 +1,48 @@
 #!/bin/bash
 
-# 启动TTS服务
+# 启动 TTS 服务（支持引擎切换）
+# 用法:
+#   bash start-tts.sh                    # 默认启动 GPT-SoVITS
+#   bash start-tts.sh --engine mlx-audio # 启动 MLX-Audio + Qwen3-TTS
+#   bash start-tts.sh --engine gpt-sovits # 启动 GPT-SoVITS
 
-LOG_DIR="unified-logs"
-PID_DIR="unified-logs/pids"
-TTS_PORT=9880
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-mkdir -p $LOG_DIR/tts $PID_DIR
+ENGINE="gpt-sovits"
 
-# 检查端口并清理
-if lsof -ti:$TTS_PORT >/dev/null; then
-    echo "⚠️  Port $TTS_PORT is in use, killing existing processes..."
-    lsof -ti:$TTS_PORT | xargs kill -9 2>/dev/null || true
-    sleep 2
-fi
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --engine) ENGINE="$2"; shift 2 ;;
+        --no-restart) NO_RESTART="--no-restart"; shift ;;
+        *) echo "未知参数: $1"; exit 1 ;;
+    esac
+done
 
-echo "🔊 Starting GPT-SoVITS TTS service..."
-cd services/gpt-sovits
-
-# 检查TTS启动脚本是否存在
-if [ -f "start.sh" ]; then
-    bash start.sh > ../../$LOG_DIR/tts/app.log 2>&1 &
-    TTS_PID=$!
-    cd ../..
-    
-    # 保存PID
-    echo $TTS_PID > $PID_DIR/tts.pid
-    echo $TTS_PID >> $PID_DIR/all_pids.txt
-    
-    # 等待启动
-    echo "⏳ Waiting for TTS service to start..."
-    sleep 10
-    
-    # 检查端口是否被占用（更可靠的检查方式）
-    if lsof -ti:$TTS_PORT >/dev/null; then
-        echo "✅ TTS service is running on port $TTS_PORT"
-        echo "📊 Logs: $LOG_DIR/tts/app.log"
-    else
-        echo "❌ TTS service failed to start. Check $LOG_DIR/tts/app.log"
+case "$ENGINE" in
+    mlx-audio)
+        TTS_START="$PROJECT_ROOT/services/mlx-audio-tts/start.sh"
+        if [ ! -f "$TTS_START" ]; then
+            echo "MLX-Audio TTS 启动脚本不存在: $TTS_START"
+            echo "请确认 services/mlx-audio-tts/ 目录已就绪"
+            exit 1
+        fi
+        echo "Starting MLX-Audio TTS service (Qwen3-TTS, port 9881)..."
+        bash "$TTS_START" ${NO_RESTART:-}
+        ;;
+    gpt-sovits)
+        TTS_START="$PROJECT_ROOT/services/gpt-sovits/start.sh"
+        if [ ! -f "$TTS_START" ]; then
+            echo "GPT-SoVITS TTS 启动脚本不存在: $TTS_START"
+            echo "请确认 services/gpt-sovits/ 目录已就绪"
+            exit 1
+        fi
+        echo "Starting GPT-SoVITS TTS service (port 9880)..."
+        bash "$TTS_START" ${NO_RESTART:-}
+        ;;
+    *)
+        echo "未知 TTS 引擎: $ENGINE"
+        echo "可选: mlx-audio, gpt-sovits"
         exit 1
-    fi
-else
-    echo "⚠️  TTS start script not found at services/gpt-sovits/start.sh"
-    echo "Please check if TTS service is properly configured."
-    exit 1
-fi
+        ;;
+esac

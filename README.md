@@ -8,7 +8,7 @@
 - 后端：Spring Boot 3 + LangChain4j + MyBatis
 - LLM：本地 LM Studio（OpenAI 兼容协议）
 - ASR：本地 SenseVoice
-- TTS：edge-tts / GPT-SoVITS（按需替换）
+- TTS: 本地 GPT-SoVITS
 - 存储：MySQL（角色卡、会话、历史、长期记忆）+ Redis（短期记忆）
 - RAG：LangChain4j EmbeddingStore（角色台词与剧情向量化）
 
@@ -121,35 +121,3 @@ cd client && npm run build:mac      # macOS
 cd client && npm run build:win     # Windows
 cd client && npm run build:linux   # Linux
 ```
-
-## 重构说明
-
-本项目已从原来的单体结构重构为模块化结构：
-
-1. **分离关注点**：将前端、后端、服务分离到不同目录
-2. **Electron集成**：将Web应用升级为桌面客户端
-3. **更好的组织**：独立服务放在services目录中
-4. **简化部署**：提供统一的构建和启动脚本
-
-## 当前状态
-
-✅ **Electron客户端已成功集成并运行**
-- 前端代码已迁移到`client/src/`
-- Electron主进程已配置
-- 一键启动脚本已创建
-- macOS桌面应用已准备就绪
-
-## 常见问题
-
-### 白屏问题
-如果Electron窗口出现白屏，请检查：
-1. 后端服务是否正常运行（端口8080）
-2. 前端开发服务器是否正常运行（端口3000）
-3. 查看日志文件：`logs/backend.log`, `logs/frontend.log`, `logs/electron.log`
-
-### 端口冲突
-如果端口被占用，使用`./stop-dev.sh`停止所有服务，然后重新启动。
-
-## License
-
-MIT

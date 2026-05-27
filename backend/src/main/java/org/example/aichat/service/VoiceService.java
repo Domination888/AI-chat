@@ -37,4 +37,10 @@ public interface VoiceService {
      * 支持完整TTS参数的流式TTS（包括音调）
      */
     long ttsStreamWithFullParams(String text, String voiceId, Double speedFactor, Double pitchFactor, Consumer<byte[]> chunkConsumer);
+
+    /** 当前 TTS 引擎输出采样率（前端动态适配用） */
+    int currentTtsSampleRate();
+
+    /** 当前 TTS 引擎输出格式：pcm_s16le | wav */
+    String currentTtsFormat();
 }

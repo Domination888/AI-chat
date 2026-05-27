@@ -4,8 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AI Chat</title>
-    <!-- 引入 Tailwind CSS (CDN 只为方便样式构建) -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 Tailwind CSS (本地安装，不再依赖CDN) -->
+    <!-- Live2D Cubism 4 Core SDK：必须在 pixi-live2d-display 之前加载 -->
+    <script src="/live2d-core/live2dcubismcore.min.js"></script>
     <style>
       /* 简单的基础样式重置 */
       body, html, #app {
@@ -23,7 +24,7 @@
       }
     </style>
   </head>
-  <body class="bg-gray-50">
+  <body>
     <div id="app"></div>
     <script type="module" src="/src/main.js"></script>
   </body>

@@ -9,7 +9,6 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.mcp.client.McpClient;
 import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
-import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
@@ -20,17 +19,17 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.aichat.dto.ChatRequest;
 import org.example.aichat.dto.Memory;
-import org.example.aichat.service.GuardrailService;
 import org.example.aichat.service.PromptService;
 import org.example.aichat.service.ChatService;
 import org.example.aichat.service.MemoryService;
 import org.example.aichat.service.RagService;
 import org.example.aichat.service.RoleCardService;
+import org.example.aichat.service.SinkRegistry;
 import org.example.aichat.mapper.ConversationMapper;
 import org.example.aichat.dto.Conversation;
+import org.example.aichat.config.LlmProperties;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
-// ... other imports
 
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -43,14 +42,8 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ChatServiceImpl implements ChatService {
 
-    /** 专用模块日志：写入 log/prompt/prompt.log（见 logback-spring.xml）—— 记录每次发往 LLM 的完整 messages */
-    private static final org.slf4j.Logger PROMPT_LOG = org.slf4j.LoggerFactory.getLogger("module.prompt");
     @Resource
     private StreamingChatModel streamingChatModel;
-    @Resource
-    private ChatModel chatModel;
-    @Resource
-    private GuardrailService guardrailService;
     @Resource
     private PromptService promptService;
     @Resource
@@ -71,51 +64,52 @@ public class ChatServiceImpl implements ChatService {
     private org.example.aichat.mapper.RoleCardMapper roleCardMapper;
     @Resource
     private RoleCardService roleCardService;
+    @Resource
+    private SinkRegistry sinkRegistry;
 
+    @Resource
+    private LlmProperties llmProperties;
 
     /** ChatMemory 窗口大小：保留最近的消息条数 */
     private static final int MAX_MEMORY_MESSAGES = 20;
+
+    /** 合法情绪标签集合（与前端 emotion-mappings.js 对齐） — 已迁移到 EmotionTagNormalizer */
+    // VALID_EMOTION_TAGS 和 EMOTION_TAG_PATTERN 已迁移
+
+    /**
+     * 规范化情绪标签：将 AI 回复中不在规定范围的 <xxx> 标签替换为最近出现的合法标签。
+     * @see org.example.aichat.util.EmotionTagNormalizer#normalize(String)
+     */
+    private String normalizeEmotionTags(String text) {
+        return org.example.aichat.util.EmotionTagNormalizer.normalize(text);
+    }
     /** 本地工具调用最大轮数 */
     private static final int MAX_TOOL_ROUNDS = 3;
 
-    // 动态模型配置
-    private StreamingChatModel createDynamicStreamingChatModel(String baseUrl, String modelName) {
-        if (baseUrl == null || modelName == null) {
-            return streamingChatModel; // 使用默认配置
-        }
+    /**
+     * 创建流式 ChatModel：前端请求传的 baseUrl/modelName 优先，否则用 LlmProperties 当前值。
+     * 始终用 SpringRestClientBuilder 以保证超时/连接参数生效。
+     */
+    private StreamingChatModel createStreamingChatModel(String requestBaseUrl, String requestModelName) {
+        String baseUrl = (requestBaseUrl != null && !requestBaseUrl.isBlank()) ? requestBaseUrl : llmProperties.getBaseUrl();
+        String modelName = (requestModelName != null && !requestModelName.isBlank()) ? requestModelName : llmProperties.getEffectiveStreamingModelName();
+        log.info("创建 StreamingChatModel: baseUrl={}, modelName={}", baseUrl, modelName);
         return dev.langchain4j.model.openai.OpenAiStreamingChatModel.builder()
                 .baseUrl(baseUrl)
                 .modelName(modelName)
-                .timeout(java.time.Duration.ofMillis(60000))
-                .build();
-    }
-    
-    private ChatModel createDynamicChatModel(String baseUrl, String modelName) {
-        if (baseUrl == null || modelName == null) {
-            return chatModel; // 使用默认配置
-        }
-        return dev.langchain4j.model.openai.OpenAiChatModel.builder()
-                .baseUrl(baseUrl)
-                .modelName(modelName)
-                .timeout(java.time.Duration.ofMillis(60000))
-                .maxRetries(1)
+                .timeout(java.time.Duration.ofMillis(llmProperties.getReadTimeoutMs()))
+                .httpClientBuilder(new dev.langchain4j.http.client.spring.restclient.SpringRestClientBuilder())
                 .build();
     }
 
     @Override
     public Flux<String> chatStream(ChatRequest request) {
-        // 创建动态模型实例
-        StreamingChatModel currentStreamingChatModel = createDynamicStreamingChatModel(
+        // 创建动态模型实例：前端传参优先，否则用 LlmProperties 热加载配置
+        StreamingChatModel currentStreamingChatModel = createStreamingChatModel(
             request.getModelBaseUrl(), request.getModelName());
-        ChatModel currentChatModel = createDynamicChatModel(
-            request.getModelBaseUrl(), request.getModelName());
-
-//        if (guardrailService.checkInput(request)) {
-//            return Flux.just("输入违规");
-//        }
 
         String conversationId = request.getConversationId();
-        Integer roleId = request.getRoleId() != null ? request.getRoleId() : 1; 
+        Integer roleId = request.getRoleId() != null ? request.getRoleId() : 1;
         Integer userId = 0;
         // 0. 保存或更新会话表
         try {
@@ -133,7 +127,7 @@ public class ChatServiceImpl implements ChatService {
         } catch (Exception e) {
             log.error("保存会话失败", e);
         }
-        
+
         // 1️⃣ 构建包含角色设定的核心 System Prompt（统一走 RoleCardService）
         StringBuilder sysPrompt = new StringBuilder();
         sysPrompt.append(roleCardService.buildSystemPrompt(roleId)).append("\n\n");
@@ -158,14 +152,14 @@ public class ChatServiceImpl implements ChatService {
                 .build();
 
         // 4️⃣ 构建用户消息
-        String textToSave = (request.getMessage() != null && !request.getMessage().trim().isEmpty()) 
+        String textToSave = (request.getMessage() != null && !request.getMessage().trim().isEmpty())
                 ? request.getMessage() : "[图片上传]";
-        
+
         List<dev.langchain4j.data.message.Content> contents = new ArrayList<>();
         contents.add(dev.langchain4j.data.message.TextContent.from(textToSave));
-        
+
         boolean hasImages = false;
-        if (request.getImages() != null && !request.getImages().isEmpty()) {    
+        if (request.getImages() != null && !request.getImages().isEmpty()) {
             hasImages = true;
             for (String base64 : request.getImages()) {
                 String mimeType = "image/jpeg";
@@ -194,28 +188,27 @@ public class ChatServiceImpl implements ChatService {
             allMessages.set(allMessages.size() - 1, UserMessage.from(contents));
         }
 
-        // 开关默认值（请求未显式带字段时按"默认开"处理）：
+        // 开关默认值（语音/文本统一：都默认开启）
         //   rag    = true   —— 角色卡/长期记忆都依赖 RAG，不能默认关
-        //   tools  = true   —— Gemma4 原生支持 tool-call；语音通道会在 AudioController 显式置 false
-        //   search = false  —— 仅用户在前端显式开启时才走联网
-        boolean useSearch = Boolean.TRUE.equals(request.getSearch());
+        //   tools  = true   —— Gemma4 原生支持 tool-call
+        //   search = true   —— 语音/文本都支持联网搜索
+        boolean useSearch = !Boolean.FALSE.equals(request.getSearch()); // null / true → 都开
         boolean useRag = !Boolean.FALSE.equals(request.getRag());     // null / true → 都开
         boolean useTools = !Boolean.FALSE.equals(request.getTools()); // null / true → 都开
 
-        // 7️⃣ 按需联网搜索（直接调用 MCP 工具，将结果注入上下文）
+        // 按需联网搜索（直接调用 MCP 工具，将结果注入上下文）
         if (useSearch && request.getMessage() != null) {
             String searchResult = executeWebSearch(request.getMessage());
             if (searchResult != null && !searchResult.isEmpty()) {
                 String searchContext = "【联网搜索结果】\n" + searchResult
                         + "\n\n请根据以上搜索结果回答用户的问题。如果搜索结果与问题无关，请忽略搜索结果并使用你的知识回答。";
-                // 在用户消息之前插入搜索结果作为上下文
                 allMessages.add(allMessages.size() - 1, UserMessage.from(searchContext));
                 allMessages.add(allMessages.size() - 1, AiMessage.from("好的，我已了解搜索结果，我会结合这些信息来回答。"));
                 log.info("已注入联网搜索结果，长度: {}", searchResult.length());
             }
         }
 
-        // 8️⃣ 本地知识库检索（RAG，默认开）
+        // 本地知识库检索（RAG，默认开）
         if (useRag && request.getMessage() != null) {
             String roleCode = null;
             try {
@@ -235,16 +228,10 @@ public class ChatServiceImpl implements ChatService {
             }
         }
 
-        // 9️⃣ 本地 MCP 工具调用（默认开；Gemma4 原生支持）
-        //    语音通道（AudioController）会显式 setTools(false) 以保首包延迟
+        // 本地 MCP 工具调用（默认开；Gemma4 原生支持）
         List<ToolSpecification> localToolSpecs = useTools ? getLocalToolSpecs() : List.of();
 
         log.debug("发送消息列表大小: {}, conversationId: {}", allMessages.size(), conversationId);
-
-        // 发往 LLM 前的完整 prompt 落盘到 log/prompt/prompt.log（含 system / RAG / 历史 / 当前用户）
-        dumpPromptToLog("chatStream", conversationId, userId, roleId, allMessages,
-                useSearch, useRag, useTools, hasImages,
-                request.getMessage(), localToolSpecs);
 
         final List<ChatMessage> finalMessages = allMessages;
         final Integer finalUserId = userId;
@@ -267,35 +254,37 @@ public class ChatServiceImpl implements ChatService {
                                   StringBuilder fullResponse,
                                   int round,
                                   StreamingChatModel currentStreamingChatModel) {
-        
-        dev.langchain4j.model.chat.request.ChatRequest.Builder reqBuilder = 
+
+        dev.langchain4j.model.chat.request.ChatRequest.Builder reqBuilder =
                 dev.langchain4j.model.chat.request.ChatRequest.builder()
                         .messages(messages);
-        
+
         if (toolSpecs != null && !toolSpecs.isEmpty() && round <= MAX_TOOL_ROUNDS) {
             reqBuilder.parameters(dev.langchain4j.model.chat.request.DefaultChatRequestParameters.builder()
                     .toolSpecifications(toolSpecs)
                     .build());
         }
 
-        // 工具回合 round>=2 时（首轮已在 chatStream 入口记录），追加记录每次重发 LLM 前的 messages 状态
-        if (round > 1) {
-            PROMPT_LOG.info("---- chatStream tool-round#{} | conversationId={} | userId={} | roleId={} | messages={} ----",
-                    round, conversationId, userId, roleId, messages.size());
-            for (int i = 0; i < messages.size(); i++) {
-                PROMPT_LOG.info("[{}#{}] {}", round, i, formatMessage(messages.get(i)));
-            }
-        }
-
         currentStreamingChatModel.chat(reqBuilder.build(), new StreamingChatResponseHandler() {
             @Override
             public void onPartialResponse(String partialResponse) {
+                // 检查取消标记：已被打断时跳过输出，不再向 sink 推数据
+                if (sinkRegistry.isCancelled(conversationId)) {
+                    log.info("onPartialResponse: conversationId={} 已被取消，跳过", conversationId);
+                    return;
+                }
                 fullResponse.append(partialResponse);
                 sink.next(partialResponse);
             }
 
             @Override
             public void onCompleteResponse(ChatResponse completeResponse) {
+                // 如果已被打断，直接结束流
+                if (sinkRegistry.isCancelled(conversationId)) {
+                    log.info("onCompleteResponse: conversationId={} 已被取消，直接结束流", conversationId);
+                    sink.complete();
+                    return;
+                }
                 AiMessage aiMsg = completeResponse.aiMessage();
                 if (aiMsg.hasToolExecutionRequests() && round <= MAX_TOOL_ROUNDS) {
                     messages.add(aiMsg);
@@ -315,10 +304,12 @@ public class ChatServiceImpl implements ChatService {
                             userId, roleId, sink, fullResponse, round + 1, currentStreamingChatModel);
                 } else {
                     if (fullResponse.length() > 0) {
-                        chatMemory.add(AiMessage.from(fullResponse.toString()));
+                        // 存入 ChatMemory 前规范化情绪标签，防止非规定标签（如<温和>）污染历史
+                        String normalized = normalizeEmotionTags(fullResponse.toString());
+                        chatMemory.add(AiMessage.from(normalized));
                     }
                     memoryService.compressIfNeeded(conversationId);
-                    // 与 chatBlocking 分支对齐：异步抽取长期记忆并推入 Redis RAG
+                    // 流式对话结束后：异步抽取长期记忆并推入 Redis RAG
                     if (userId != null && roleId != null) {
                         new Thread(() -> {
                             try {
@@ -377,177 +368,4 @@ public class ChatServiceImpl implements ChatService {
         }
     }
 
-    @Override
-    public String chatBlocking(String conversationId, String message, Integer userId, Integer roleId) {
-        return chatBlockingWithModel(conversationId, message, userId, roleId, null, null);
-    }
-    
-    /**
-     * 支持动态模型配置的阻塞式对话
-     */
-    @Override
-    public String chatBlockingWithModel(String conversationId, String message, Integer userId, Integer roleId, String modelBaseUrl, String modelName) {
-        ChatModel currentChatModel = createDynamicChatModel(modelBaseUrl, modelName);
-
-        // 1. 保存或更新会话表
-        Conversation conversation = new Conversation();
-        conversation.setId(conversationId);
-        conversation.setUserId(userId);
-        conversation.setRoleId(roleId);
-        conversation.setTitle("语音角色扮演会话");
-        conversationMapper.insertOrUpdate(conversation);
-
-        // 2. 加载短期记忆窗口
-        ChatMemory chatMemory = MessageWindowChatMemory.builder()
-                .id(conversationId)
-                .maxMessages(MAX_MEMORY_MESSAGES)
-                .chatMemoryStore(chatMemoryStore)
-                .build();
-
-        // 3. 构建包含角色设定的核心 System Prompt（统一走 RoleCardService）
-        StringBuilder sysPrompt = new StringBuilder();
-        sysPrompt.append(roleCardService.buildSystemPrompt(roleId)).append("\n");
-        sysPrompt.append("【语音输出补充】\n")
-                 .append("你的回答将被转换为语音进行播放，所以请返回纯文本的口语化对白，避免 markdown 语法和复杂书面符号。\n\n");
-
-        // 4. 加载长期记忆 (RAG)
-        String longTermMemory = ragService.searchLongTermMemoryContext(userId, roleId, message, 3);
-        if (longTermMemory != null && !longTermMemory.isEmpty()) {
-            sysPrompt.append("【曾经零碎的长期记忆】（以下是你脑海中闪过的往事，作为你的经验和先验知识参考）：\n")
-                     .append(longTermMemory).append("\n\n");
-        }
-        
-        // 5. 加载事件总结 (Summary Memory)
-        Memory memory = memoryService.findByConversationId(conversationId);
-        if (memory != null && memory.getSummary() != null && !memory.getSummary().isEmpty()) {
-            sysPrompt.append("【近期聊天前情提要】\n").append(memory.getSummary()).append("\n\n");
-        }
-
-        // 6. 拼装消息，发送给模型
-        List<ChatMessage> finalMessages = new ArrayList<>();
-        finalMessages.add(dev.langchain4j.data.message.SystemMessage.from(sysPrompt.toString()));
-        
-        // 加上短期上下文
-        finalMessages.addAll(chatMemory.messages());
-        
-        // 加上当前用户消息
-        UserMessage currentUserMsg = UserMessage.from(message);
-        finalMessages.add(currentUserMsg);
-
-        // 发往 LLM 前的完整 prompt 落盘到 log/prompt/prompt.log（语音通道阻塞分支）
-        dumpPromptToLog("chatBlocking", conversationId, userId, roleId, finalMessages,
-                false, true, false, false, message, java.util.Collections.emptyList());
-
-        try {
-            ChatResponse response = currentChatModel.chat(finalMessages);
-            String aiText = response.aiMessage().text();            
-            // 将最新回合加入记忆库
-            chatMemory.add(currentUserMsg);
-            chatMemory.add(AiMessage.from(aiText));
-            
-            // 异步触发判断是否需要浓缩记忆推入 RAG
-            new Thread(() -> {
-                memoryService.compressAndExtractLongTermMemory(conversationId, userId, roleId);
-            }).start();
-            
-            return aiText;
-        } catch (Exception e) {
-            log.error("AI 角色扮演语音聊天失败", e);
-            return "（思考中断了，请再说一遍好吗...）";
-        }
-    }
-
-    // ============================================================
-    // Prompt 模块日志：把每次发到 LLM 的完整消息列表写到 log/prompt/prompt.log
-    // 不做截断，便于排查"角色漂移 / RAG 噪声 / 历史污染"等问题
-    // ============================================================
-    private void dumpPromptToLog(String channel,
-                                 String conversationId,
-                                 Integer userId,
-                                 Integer roleId,
-                                 List<ChatMessage> messages,
-                                 boolean useSearch,
-                                 boolean useRag,
-                                 boolean useTools,
-                                 boolean hasImages,
-                                 String userMessage,
-                                 List<ToolSpecification> toolSpecs) {
-        try {
-            int totalChars = 0;
-            for (ChatMessage m : messages) totalChars += approxLen(m);
-            PROMPT_LOG.info("==== {} | conversationId={} | userId={} | roleId={} | useSearch={} | useRag={} | useTools={} | hasImages={} | toolSpecs={} | messages={} | approxChars={} | userMsg={} ====",
-                    channel, conversationId, userId, roleId, useSearch, useRag, useTools, hasImages,
-                    toolSpecs == null ? 0 : toolSpecs.size(),
-                    messages.size(), totalChars,
-                    userMessage == null ? "" : userMessage);
-            for (int i = 0; i < messages.size(); i++) {
-                PROMPT_LOG.info("[{}] {}", i, formatMessage(messages.get(i)));
-            }
-            if (toolSpecs != null && !toolSpecs.isEmpty()) {
-                StringBuilder sb = new StringBuilder();
-                for (ToolSpecification t : toolSpecs) {
-                    if (sb.length() > 0) sb.append(", ");
-                    sb.append(t.name());
-                }
-                PROMPT_LOG.info("[tools] {}", sb);
-            }
-            PROMPT_LOG.info("==== {} end ====", channel);
-        } catch (Exception e) {
-            // 日志失败不影响主链路
-            log.warn("dumpPromptToLog 失败: {}", e.toString());
-        }
-    }
-
-    private String formatMessage(ChatMessage m) {
-        if (m == null) return "null";
-        if (m instanceof dev.langchain4j.data.message.SystemMessage sm) {
-            return "SYSTEM: " + sm.text();
-        }
-        if (m instanceof UserMessage um) {
-            // 多模态时 contents 可能是文本+图片，逐项打印（图片只记录 mimeType）
-            StringBuilder sb = new StringBuilder("USER: ");
-            for (dev.langchain4j.data.message.Content c : um.contents()) {
-                if (c instanceof dev.langchain4j.data.message.TextContent tc) {
-                    sb.append(tc.text());
-                } else if (c instanceof dev.langchain4j.data.message.ImageContent) {
-                    sb.append("<image>");
-                } else {
-                    sb.append("<").append(c.getClass().getSimpleName()).append(">");
-                }
-            }
-            return sb.toString();
-        }
-        if (m instanceof AiMessage am) {
-            String text = am.text() == null ? "" : am.text();
-            if (am.hasToolExecutionRequests()) {
-                StringBuilder sb = new StringBuilder("AI: ").append(text).append(" | toolCalls=[");
-                int i = 0;
-                for (var t : am.toolExecutionRequests()) {
-                    if (i++ > 0) sb.append(", ");
-                    sb.append(t.name()).append("(").append(t.arguments()).append(")");
-                }
-                sb.append("]");
-                return sb.toString();
-            }
-            return "AI: " + text;
-        }
-        if (m instanceof ToolExecutionResultMessage tr) {
-            return "TOOL_RESULT(" + tr.toolName() + "): " + tr.text();
-        }
-        return m.getClass().getSimpleName() + ": " + m.toString();
-    }
-
-    private int approxLen(ChatMessage m) {
-        if (m instanceof dev.langchain4j.data.message.SystemMessage sm) return sm.text() == null ? 0 : sm.text().length();
-        if (m instanceof UserMessage um) {
-            int n = 0;
-            for (dev.langchain4j.data.message.Content c : um.contents()) {
-                if (c instanceof dev.langchain4j.data.message.TextContent tc && tc.text() != null) n += tc.text().length();
-            }
-            return n;
-        }
-        if (m instanceof AiMessage am) return am.text() == null ? 0 : am.text().length();
-        if (m instanceof ToolExecutionResultMessage tr) return tr.text() == null ? 0 : tr.text().length();
-        return 0;
-    }
 }
