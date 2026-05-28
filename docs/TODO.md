@@ -2,11 +2,10 @@
 - 记忆 + memos，现在每次都要sum history，这样肯定不对(claude)(次重要)
 - tts调优，到底为什么ttfb那么高？SSE返回失败了(claude)(最重要)
 - 重构prompt，优化口癖，别带口癖(claude)
-- 先把cursor买了再说，若能用支付宝，下完之后彻底把tts改好，我怀疑根本就没走MLX，实在不行就把tts转移到win端
+- 
 ### 未排期优化：
 - 双py版本导致内存占用过多(claude)
 - 数据库回读时表情露出(GLM)
-- 日志系统全面优化，现在会在后端根目录生成空文件夹(claude)
 - mcp的联网搜索未测试
 - tools和mcp还是该启动时校验
 - 真打包，怎么打包成全依赖的exe和dmg？

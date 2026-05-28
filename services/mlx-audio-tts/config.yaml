@@ -1,0 +1,37 @@
+# MLX-Audio TTS 服务配置
+# 部署约束：Mac M4 32GB 统一内存，Apple MLX 原生加速
+
+# ---- 服务 ----
+host: 127.0.0.1
+port: 9881
+
+# ---- 模型 ----
+# 主力：0.6B bf16（~1.5GB 内存，TTFB ~200ms）
+model: mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16
+# 备选：1.7B 8bit（~2GB 内存，音质更好）
+# model: mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit
+
+# ---- 音色 ----
+# Qwen3-TTS 内置音色（不需要参考音频）
+default_voice: Chelsie
+# 中文可用音色：Chelsie, Cherry, Ethan, Serena 等
+# 语音克隆时使用参考音频路径覆盖
+
+# ---- 语音克隆参考音频 ----
+# 黍角色参考音频（绝对路径）
+ref_audio_shu: services/gpt-sovits/v4/黍/reference_audios/中文/emotions/【默认】让我看看我带来的这些渔具放到哪里好呢？.wav
+ref_text_shu: "让我看看我带来的这些渔具放到哪里好呢？"
+
+# ---- 语言 ----
+default_lang: zh
+
+# ---- 输出 ----
+# Qwen3-TTS 输出采样率 24kHz（与 GPT-SoVITS v2Pro 48kHz 不同）
+sample_rate: 24000
+# 后端 voice.mlx-audio-stream=true 时请求 stream+pcm；关闭则 TTFB≈整句耗时
+
+# ---- 流式（由 Java 后端请求体传入，此处仅作文档）----
+# stream: true + streaming_interval: 0.5 → 长句首包 ~1s（克隆参考音）；false → 首包 ~20s+
+
+# ---- 引擎标识 ----
+engine: mlx-audio
