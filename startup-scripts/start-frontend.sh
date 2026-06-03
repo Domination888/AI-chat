@@ -20,15 +20,7 @@ fi
 echo "🎨 Starting Vite frontend server..."
 cd "$PROJECT_ROOT/client/src"
 npm run dev > "$LOG_DIR/frontend/app.log" 2>&1 &
-FRONTEND_PID=$!
 cd "$PROJECT_ROOT"
-
-# 保存PID（单一 pids.txt）
-if [ -f "$PID_FILE" ]; then
-    grep -v "^frontend " "$PID_FILE" > "$PID_FILE.tmp" || true
-    mv "$PID_FILE.tmp" "$PID_FILE"
-fi
-echo "frontend $FRONTEND_PID" >> "$PID_FILE"
 
 # 等待启动
 echo "⏳ Waiting for frontend to start..."
@@ -42,3 +34,13 @@ else
     echo "❌ Frontend failed to start. Check $LOG_DIR/frontend/app.log"
     exit 1
 fi
+
+# 抓真实监听 PID（npm 是 wrapper，真正监听的是 vite/esbuild 子进程）
+FRONTEND_PID=$(lsof -nP -iTCP:$FRONTEND_PORT -sTCP:LISTEN -t 2>/dev/null | sort -n | head -1)
+
+# 保存PID（单一 pids.txt）
+if [ -f "$PID_FILE" ]; then
+    grep -v "^frontend " "$PID_FILE" > "$PID_FILE.tmp" || true
+    mv "$PID_FILE.tmp" "$PID_FILE"
+fi
+[ -n "$FRONTEND_PID" ] && echo "frontend $FRONTEND_PID" >> "$PID_FILE"

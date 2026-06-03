@@ -20,15 +20,7 @@ fi
 echo "📦 Starting Spring Boot backend..."
 cd "$PROJECT_ROOT/backend"
 ./mvnw spring-boot:run > "$LOG_DIR/backend/app.log" 2>&1 &
-BACKEND_PID=$!
 cd "$PROJECT_ROOT"
-
-# 保存PID（单一 pids.txt）
-if [ -f "$PID_FILE" ]; then
-    grep -v "^backend " "$PID_FILE" > "$PID_FILE.tmp" || true
-    mv "$PID_FILE.tmp" "$PID_FILE"
-fi
-echo "backend $BACKEND_PID" >> "$PID_FILE"
 
 # 等待启动
 echo "⏳ Waiting for backend to start..."
@@ -42,3 +34,13 @@ else
     echo "❌ Backend failed to start. Check $LOG_DIR/backend/app.log"
     exit 1
 fi
+
+# 抓真实监听 PID（mvnw 是 wrapper，$! 是短命的，要拿监听 8080 的 java 进程）
+BACKEND_PID=$(lsof -nP -iTCP:$BACKEND_PORT -sTCP:LISTEN -t 2>/dev/null | sort -n | head -1)
+
+# 保存PID（单一 pids.txt）
+if [ -f "$PID_FILE" ]; then
+    grep -v "^backend " "$PID_FILE" > "$PID_FILE.tmp" || true
+    mv "$PID_FILE.tmp" "$PID_FILE"
+fi
+[ -n "$BACKEND_PID" ] && echo "backend $BACKEND_PID" >> "$PID_FILE"

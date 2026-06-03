@@ -1,48 +1,18 @@
 #!/bin/bash
 
-# 启动 TTS 服务（支持引擎切换）
-# 用法:
-#   bash start-tts.sh                    # 默认启动 GPT-SoVITS
-#   bash start-tts.sh --engine mlx-audio # 启动 MLX-Audio + Qwen3-TTS
-#   bash start-tts.sh --engine gpt-sovits # 启动 GPT-SoVITS
+# TTS 服务已迁移到 Win (Astra/Genie-TTS :5000)
+# Mac 端无需启动本地 TTS 服务，后端直接调用 Win API
+# 此脚本仅做健康检查
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-ENGINE="gpt-sovits"
+TTS_URL="http://192.168.124.2:5000/api/tts/status"
 
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --engine) ENGINE="$2"; shift 2 ;;
-        --no-restart) NO_RESTART="--no-restart"; shift ;;
-        *) echo "未知参数: $1"; exit 1 ;;
-    esac
-done
-
-case "$ENGINE" in
-    mlx-audio)
-        TTS_START="$PROJECT_ROOT/services/mlx-audio-tts/start.sh"
-        if [ ! -f "$TTS_START" ]; then
-            echo "MLX-Audio TTS 启动脚本不存在: $TTS_START"
-            echo "请确认 services/mlx-audio-tts/ 目录已就绪"
-            exit 1
-        fi
-        echo "Starting MLX-Audio TTS service (Qwen3-TTS, port 9881)..."
-        bash "$TTS_START" ${NO_RESTART:-}
-        ;;
-    gpt-sovits)
-        TTS_START="$PROJECT_ROOT/services/gpt-sovits/start.sh"
-        if [ ! -f "$TTS_START" ]; then
-            echo "GPT-SoVITS TTS 启动脚本不存在: $TTS_START"
-            echo "请确认 services/gpt-sovits/ 目录已就绪"
-            exit 1
-        fi
-        echo "Starting GPT-SoVITS TTS service (port 9880)..."
-        bash "$TTS_START" ${NO_RESTART:-}
-        ;;
-    *)
-        echo "未知 TTS 引擎: $ENGINE"
-        echo "可选: mlx-audio, gpt-sovits"
-        exit 1
-        ;;
-esac
+echo "Checking Astra TTS service on Win ($TTS_URL)..."
+if curl -s --max-time 5 "$TTS_URL" > /dev/null 2>&1; then
+    echo "Astra TTS service is reachable."
+else
+    echo "WARNING: Astra TTS service ($TTS_URL) is not reachable."
+    echo "Make sure the TTS service is running on Win (192.168.124.2:5000)."
+fi

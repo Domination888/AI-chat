@@ -18,16 +18,16 @@ import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.aichat.dto.ChatRequest;
-import org.example.aichat.dto.Memory;
 import org.example.aichat.service.PromptService;
 import org.example.aichat.service.ChatService;
-import org.example.aichat.service.MemoryService;
 import org.example.aichat.service.RagService;
 import org.example.aichat.service.RoleCardService;
 import org.example.aichat.service.SinkRegistry;
+import org.example.aichat.service.memos.MemosClient;
 import org.example.aichat.mapper.ConversationMapper;
 import org.example.aichat.dto.Conversation;
 import org.example.aichat.config.LlmProperties;
+import org.example.aichat.util.PromptLogger;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 
@@ -47,7 +47,7 @@ public class ChatServiceImpl implements ChatService {
     @Resource
     private PromptService promptService;
     @Resource
-    private MemoryService memoryService;
+    private MemosClient memosClient;
     @Resource
     private RagService ragService;
     @Resource
@@ -69,6 +69,12 @@ public class ChatServiceImpl implements ChatService {
 
     @Resource
     private LlmProperties llmProperties;
+
+    @Resource
+    private org.example.aichat.config.MemosProperties memosProperties;
+
+    @Resource
+    private PromptLogger promptLogger;
 
     /** ChatMemory 窗口大小：保留最近的消息条数 */
     private static final int MAX_MEMORY_MESSAGES = 20;
@@ -132,17 +138,49 @@ public class ChatServiceImpl implements ChatService {
         StringBuilder sysPrompt = new StringBuilder();
         sysPrompt.append(roleCardService.buildSystemPrompt(roleId)).append("\n\n");
 
-        // 2️⃣ 加载长期记忆 (RAG) 和近期总结
-        String longTermMemory = ragService.searchLongTermMemoryContext(userId, roleId, request.getMessage(), 3);
-        if (longTermMemory != null && !longTermMemory.isEmpty()) {
-            sysPrompt.append("【曾经闪过的往事片段】\n").append(longTermMemory).append("\n\n");
-        }
+        // 2️⃣ 加载长期记忆（Memos 结构化分段注入）
+        if (request.getMessage() != null) {
+            String memosUserId = memosProperties.getEffectiveUserId();
+            MemosClient.SearchResult memResult = memosClient.searchStructured(
+                    memosUserId, null, roleId, request.getMessage(), memosClient.defaultSearchTopK());
 
-        Memory memory = memoryService.findByConversationId(conversationId);
-        String memorySummary = (memory != null) ? memory.getSummary() : null;
-        if (memorySummary != null && !memorySummary.isEmpty()) {
-            sysPrompt.append("【近期聊天前情提要】\n").append(memorySummary).append("\n\n");
+            if (!memResult.isEmpty()) {
+                // 用户事实记忆（UserMemory）—— 关于"用户是谁/喜欢什么"的事实
+                if (!memResult.userMemories().isEmpty()) {
+                    sysPrompt.append("【关于用户的事实记忆】（你已知的用户信息，回答时必须参照，不要重复询问）\n");
+                    for (MemosClient.MemoryItem m : memResult.userMemories()) {
+                        sysPrompt.append("- ").append(m.text()).append("\n");
+                    }
+                    sysPrompt.append("\n");
+                }
+
+                // 长期记忆/角色日记（LongTermMemory）—— 角色第一人称视角的回忆
+                if (!memResult.longTermMemories().isEmpty()) {
+                    sysPrompt.append("【你与用户之间的往事回忆】（以你的视角发生过的事，可作为话题与情感参考）\n");
+                    for (MemosClient.MemoryItem m : memResult.longTermMemories()) {
+                        sysPrompt.append("- ").append(m.text()).append("\n");
+                    }
+                    sysPrompt.append("\n");
+                }
+
+                // 偏好记忆（PrefMemory）—— Memos 提取的用户偏好
+                if (!memResult.preferenceMemories().isEmpty()) {
+                    sysPrompt.append("【用户偏好】（请在回答时优先满足）\n");
+                    for (MemosClient.MemoryItem m : memResult.preferenceMemories()) {
+                        sysPrompt.append("- ").append(m.text()).append("\n");
+                    }
+                    sysPrompt.append("\n");
+                }
+            } else if (!memosClient.isEnabled() || memosClient.isFallbackToRag()) {
+                // Memos 不可用时降级到 Redis RAG 长期记忆
+                String longTermMemory = ragService.searchLongTermMemoryContext(userId, roleId, request.getMessage(), 3);
+                if (longTermMemory != null && !longTermMemory.isEmpty()) {
+                    sysPrompt.append("【曾经闪过的往事片段】\n").append(longTermMemory).append("\n\n");
+                }
+            }
         }
+        // 旧的 MySQL memory.summary 注入已移除：长期记忆完全由 Memos 接管，
+        // 短期上下文由下方 ChatMemory 滑窗（history 表）提供。
 
         // 3️⃣ 创建 ChatMemory —— 自动从 history 表加载历史消息
         ChatMemory chatMemory = MessageWindowChatMemory.builder()
@@ -223,7 +261,7 @@ public class ChatServiceImpl implements ChatService {
             String ragContext = ragService.retrieveContext(roleCode, request.getMessage(), 3);
             if (ragContext != null && !ragContext.isEmpty()) {
                 allMessages.add(allMessages.size() - 1, UserMessage.from(ragContext));
-                allMessages.add(allMessages.size() - 1, AiMessage.from("好的，我会优先依据本地知识库检索结果进行回答。"));
+                allMessages.add(allMessages.size() - 1, AiMessage.from("好的，我已了解这些信息，会结合上下文回答。"));
                 log.info("已注入 RAG 上下文，roleCode={}, 长度: {}", roleCode, ragContext.length());
             }
         }
@@ -240,7 +278,8 @@ public class ChatServiceImpl implements ChatService {
 
         return Flux.create(sink -> {
             doStreamToolLoop(finalMessages, localToolSpecs, chatMemory, conversationId,
-                    finalUserId, finalRoleId, sink, new StringBuilder(), 1, finalCurrentStreamingChatModel);
+                    finalUserId, finalRoleId, sink, new StringBuilder(), 1, finalCurrentStreamingChatModel,
+                    request.getMessage());
         });
     }
 
@@ -253,11 +292,15 @@ public class ChatServiceImpl implements ChatService {
                                   reactor.core.publisher.FluxSink<String> sink,
                                   StringBuilder fullResponse,
                                   int round,
-                                  StreamingChatModel currentStreamingChatModel) {
+                                  StreamingChatModel currentStreamingChatModel,
+                                  String originalUserMessage) {
 
         dev.langchain4j.model.chat.request.ChatRequest.Builder reqBuilder =
                 dev.langchain4j.model.chat.request.ChatRequest.builder()
                         .messages(messages);
+
+        // 记录发送给 LLM 的完整 prompt
+        promptLogger.log(conversationId, messages);
 
         if (toolSpecs != null && !toolSpecs.isEmpty() && round <= MAX_TOOL_ROUNDS) {
             reqBuilder.parameters(dev.langchain4j.model.chat.request.DefaultChatRequestParameters.builder()
@@ -301,24 +344,32 @@ public class ChatServiceImpl implements ChatService {
                         }
                     }
                     doStreamToolLoop(messages, toolSpecs, chatMemory, conversationId,
-                            userId, roleId, sink, fullResponse, round + 1, currentStreamingChatModel);
+                            userId, roleId, sink, fullResponse, round + 1, currentStreamingChatModel, originalUserMessage);
                 } else {
                     if (fullResponse.length() > 0) {
                         // 存入 ChatMemory 前规范化情绪标签，防止非规定标签（如<温和>）污染历史
                         String normalized = normalizeEmotionTags(fullResponse.toString());
                         chatMemory.add(AiMessage.from(normalized));
+
+                        // 对话结束后：仅将本轮 user 原话推入 Memos（异步）
+                        // 严格遵循 Memos 官方推荐用法：只推 role=user 单条
+                        // 避免 assistant 内容污染 UserMemory 桶（曾观察到 LLM 幻觉被误存为"用户事实"）
+                        if (memosClient.isEnabled() && userId != null && roleId != null
+                                && originalUserMessage != null && !originalUserMessage.isEmpty()) {
+                            String userMsg = originalUserMessage;
+                            String memosUserId = memosProperties.getEffectiveUserId();
+                            new Thread(() -> {
+                                try {
+                                    memosClient.addUserMessage(memosUserId, null, roleId, userMsg);
+                                } catch (Exception e) {
+                                    log.warn("推入 Memos 用户记忆失败 conversationId={}", conversationId, e);
+                                }
+                            }).start();
+                        }
                     }
-                    memoryService.compressIfNeeded(conversationId);
-                    // 流式对话结束后：异步抽取长期记忆并推入 Redis RAG
-                    if (userId != null && roleId != null) {
-                        new Thread(() -> {
-                            try {
-                                memoryService.compressAndExtractLongTermMemory(conversationId, userId, roleId);
-                            } catch (Exception e) {
-                                log.error("流式对话结束后抽取长期记忆失败 conversationId={}", conversationId, e);
-                            }
-                        }).start();
-                    }
+                    // 长期记忆完全由 Memos 接管：无需再触发 MySQL 摘要 / LLM 二次写日记
+                    // 每轮 user+assistant 已在上方 addConversationMemory 推入 Memos，
+                    // Memos 内置 MemReader 会自动提取事实并产出 UserMemory/LongTermMemory。
                     sink.complete();
                 }
             }

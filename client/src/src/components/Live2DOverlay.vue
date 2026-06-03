@@ -166,8 +166,8 @@ const clickMotions = allMotions.filter(m =>
 
 const playMotion = (m) => {
   if (!model) return
-  // 用户手动触发的动作（点击互动/面板），播放动作音效
-  config.sound = true
+  // 只触发动作，不触发声音（避免与 TTS 语音冲突）
+  config.sound = false
   try { model.motion(m.group, m.index) } catch (e) { console.warn(e) }
 }
 

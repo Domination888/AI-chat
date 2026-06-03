@@ -1,15 +1,12 @@
 ### 近期优化：
-- 记忆 + memos，现在每次都要sum history，这样肯定不对(claude)(次重要)
-- tts调优，到底为什么ttfb那么高？SSE返回失败了(claude)(最重要)
-- 重构prompt，优化口癖，别带口癖(claude)
-- 
+- 使用win上的gemma4重跑黍人格
+
 ### 未排期优化：
-- 双py版本导致内存占用过多(claude)
-- 数据库回读时表情露出(GLM)
 - mcp的联网搜索未测试
 - tools和mcp还是该启动时校验
 - 真打包，怎么打包成全依赖的exe和dmg？
 - 拓展skill
+- AstraTTS mac改版
 
 ### 待测试：
 - 打断是否生效

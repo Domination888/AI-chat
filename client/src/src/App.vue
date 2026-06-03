@@ -579,7 +579,7 @@ const audioUnlocked = ref(false)  // AudioContext 是否已 resume
 let audioCtx = null               // 全局唯一 AudioContext
 let currentSource = null          // 正在播放的 BufferSource（用于停止）
 const ttsBuffers = new Map()      // idx -> { chunks: Uint8Array[] }
-/** MLX 流式 PCM：按 AudioContext 时间轴无缝拼接，避免 8KB 分片断档/爆音 */
+/** 流式 PCM：按 AudioContext 时间轴无缝拼接，避免 8KB 分片断档/爆音 */
 const ttsStreamPlayers = new Map() // idx -> { nextTime, carry, ... }
 let currentAbortController = null  // 当前 SSE 请求的 AbortController（用于打断）
 
@@ -669,7 +669,7 @@ const stopTtsStreamPlayer = (idx) => {
 }
 
 /**
- * MLX 流式 PCM：在 AudioContext 时间轴上连续 schedule，保证样本边界对齐。
+ * 流式 PCM：在 AudioContext 时间轴上连续 schedule，保证样本边界对齐。
  * 不可把每个 HTTP/SSE 分片当成独立 BufferSource 排队（会断档，且奇数字节会爆音）。
  */
 const feedStreamPcm = (idx, bytes, buf) => {
@@ -677,13 +677,18 @@ const feedStreamPcm = (idx, bytes, buf) => {
   if (!ctx) return
   if (ctx.state !== 'running') return
 
+  const isF32 = buf.format === 'pcm_f32le'
+  const alignBytes = isF32 ? 4 : 2  // float32=4字节对齐, int16=2字节对齐
+
   let player = ttsStreamPlayers.get(idx)
   if (!player) {
     player = {
       sampleRate: buf.sampleRate,
       channels: buf.channels || 1,
+      format: buf.format,
       nextTime: ctx.currentTime + 0.02,
-      carry: null,
+      carryLen: 0,      // carry 中未对齐的字节数
+      carry: null,       // Uint8Array，存放上一次未对齐的尾部字节
       lipSyncStarted: false,
       activeSources: [],
       stopTimer: null,
@@ -691,23 +696,41 @@ const feedStreamPcm = (idx, bytes, buf) => {
     ttsStreamPlayers.set(idx, player)
   }
 
+  // 拼接 carry + 新字节
   let merged = bytes
-  if (player.carry !== null) {
-    const joined = new Uint8Array(1 + bytes.length)
-    joined[0] = player.carry
-    joined.set(bytes, 1)
+  if (player.carry !== null && player.carryLen > 0) {
+    const joined = new Uint8Array(player.carryLen + bytes.length)
+    joined.set(player.carry.subarray(0, player.carryLen), 0)
+    joined.set(bytes, player.carryLen)
     merged = joined
     player.carry = null
+    player.carryLen = 0
   }
 
-  if (merged.length & 1) {
-    player.carry = merged[merged.length - 1]
+  // 按对齐字节截断
+  const alignedLen = merged.length & ~(alignBytes - 1)
+  if (alignedLen < alignBytes) {
+    // 全部不够一个样本，拷贝到独立 buffer 暂存
+    const carryBuf = new Uint8Array(merged.length)
+    carryBuf.set(merged.subarray ? merged : new Uint8Array(merged), 0)
+    player.carry = carryBuf
+    player.carryLen = merged.length
+    return
   }
-  const alignedLen = merged.length & ~1
-  if (alignedLen < 2) return
+
+  // 尾部未对齐部分暂存（必须拷贝到独立 buffer，避免 view 引用被后续覆盖）
+  if (alignedLen < merged.length) {
+    const carryBytes = merged.length - alignedLen
+    const carryBuf = new Uint8Array(carryBytes)
+    carryBuf.set(merged.subarray(alignedLen, merged.length), 0)
+    player.carry = carryBuf
+    player.carryLen = carryBytes
+  }
 
   const pcm = merged.subarray(0, alignedLen)
-  const audioBuf = pcmInt16ToAudioBuffer(ctx, pcm, player.sampleRate, player.channels)
+  const audioBuf = isF32
+    ? pcmFloat32ToAudioBuffer(ctx, pcm, player.sampleRate, player.channels)
+    : pcmInt16ToAudioBuffer(ctx, pcm, player.sampleRate, player.channels)
   const src = ctx.createBufferSource()
   src.buffer = audioBuf
   src.connect(ctx.destination)
@@ -733,12 +756,21 @@ const feedStreamPcm = (idx, bytes, buf) => {
 const finishTtsStreamPlayer = (idx) => {
   const player = ttsStreamPlayers.get(idx)
   if (!player) return
-  if (player.carry !== null) {
-    feedStreamPcm(idx, new Uint8Array([player.carry, 0]), {
-      sampleRate: player.sampleRate,
-      channels: player.channels,
-    })
+  if (player.carry !== null && player.carryLen > 0) {
+    // 补零对齐后刷出剩余字节
+    const alignBytes = (player.format === 'pcm_f32le') ? 4 : 2
+    const padLen = alignBytes - (player.carryLen % alignBytes)
+    if (padLen < alignBytes) {
+      const padded = new Uint8Array(player.carryLen + padLen)
+      padded.set(player.carry.subarray(0, player.carryLen), 0)
+      feedStreamPcm(idx, padded, {
+        sampleRate: player.sampleRate,
+        channels: player.channels,
+        format: player.format,
+      })
+    }
     player.carry = null
+    player.carryLen = 0
   }
   const ctx = getAudioCtx()
   const delayMs = ctx
@@ -748,9 +780,67 @@ const finishTtsStreamPlayer = (idx) => {
     if (ttsStreamPlayers.get(idx) === player) {
       live2dController.stopLipSync()
       ttsStreamPlayers.delete(idx)
+      // 音频实际播完，通知串行队列推进下一句
+      onTtsSentenceFinished(idx)
     }
   }, delayMs)
 }
+
+// ---- TTS 句子级串行播放队列 ----
+// 同一对话中多个句子的流式 PCM 播放器必须串行排队，
+// 前一句播放结束后再开始下一句，避免多句重叠。
+const ttsSentenceQueue = []       // 排队等待播放的句子 idx
+let ttsPlayingIdx = null          // 当前正在播放的句子 idx
+const ttsSentenceReady = new Set() // 已收到 chunkEnd 但还没开始播放的句子 idx
+
+/**
+ * 将句子 idx 加入串行队列，若当前无句子在播放则立即开始。
+ */
+const enqueueTtsSentence = (idx) => {
+  ttsSentenceQueue.push(idx)
+  pumpTtsSentenceQueue()
+}
+
+/**
+ * 驱动 TTS 句子串行队列：当前无播放时，取出队首 idx 并激活其 streamPlayer。
+ */
+const pumpTtsSentenceQueue = () => {
+  if (ttsPlayingIdx !== null) return  // 正在播放，等前一句结束
+  if (ttsSentenceQueue.length === 0) return
+  ttsPlayingIdx = ttsSentenceQueue.shift()
+
+  // 激活该句子的 streamPlayer：把暂存的 chunks 灌入 feedStreamPcm
+  const pending = ttsPendingChunks.get(ttsPlayingIdx)
+  if (pending) {
+    ttsPendingChunks.delete(ttsPlayingIdx)
+    for (const { bytes, buf } of pending) {
+      feedStreamPcm(ttsPlayingIdx, bytes, buf)
+    }
+  }
+
+  // 如果该句的所有 chunks 已经到齐（chunkEnd 已到），立即结束播放
+  if (ttsSentenceReady.has(ttsPlayingIdx)) {
+    ttsSentenceReady.delete(ttsPlayingIdx)
+    finishTtsStreamPlayer(ttsPlayingIdx)
+    // 注意：finishTtsStreamPlayer 内部的 setTimeout 会在音频播完后
+    // 调用 onTtsSentenceFinished 推进下一句
+  }
+}
+
+/**
+ * 当前句子的音频实际播完后调用，推进队列中的下一句。
+ * 注意：不能在 chunkEnd 时同步调用，因为此时音频还在 AudioContext 时间轴上播放。
+ * 必须等到 player.nextTime 到期（即最后一个 BufferSource 播完）后再推进。
+ */
+const onTtsSentenceFinished = (idx) => {
+  if (ttsPlayingIdx === idx) {
+    ttsPlayingIdx = null
+    pumpTtsSentenceQueue()
+  }
+}
+
+// 暂存因串行队列未到而延迟喂入的 PCM chunks：idx -> [{bytes, buf}]
+const ttsPendingChunks = new Map()
 
 const handleTtsEvent = (payload) => {
   const idx = payload.idx
@@ -762,14 +852,25 @@ const handleTtsEvent = (payload) => {
       streamPlay: !!payload.streamPlay,
       chunks: []
     })
+    // 流式句子：加入串行队列
+    if (payload.streamPlay) {
+      enqueueTtsSentence(idx)
+    }
   }
   const buf = ttsBuffers.get(idx)
   if (!buf) return
   if (payload.audioBase64) {
     try {
       const bytes = decodeTtsChunkBytes(payload.audioBase64)
-      if (buf.streamPlay && buf.format === 'pcm_s16le') {
-        feedStreamPcm(idx, bytes, buf)
+      if (buf.streamPlay && (buf.format === 'pcm_s16le' || buf.format === 'pcm_f32le')) {
+        // 串行控制：只有当前正在播放的句子才立即喂入 feedStreamPcm
+        if (ttsPlayingIdx === idx) {
+          feedStreamPcm(idx, bytes, buf)
+        } else {
+          // 还没轮到该句播放，暂存 chunks
+          if (!ttsPendingChunks.has(idx)) ttsPendingChunks.set(idx, [])
+          ttsPendingChunks.get(idx).push({ bytes, buf })
+        }
       } else {
         buf.chunks.push(bytes)
       }
@@ -779,7 +880,21 @@ const handleTtsEvent = (payload) => {
   }
   if (payload.chunkEnd) {
     if (buf.streamPlay) {
-      finishTtsStreamPlayer(idx)
+      // 如果该句暂存了 chunks 且当前正在播放它，一次性灌入
+      const pending = ttsPendingChunks.get(idx)
+      if (pending && ttsPlayingIdx === idx) {
+        ttsPendingChunks.delete(idx)
+        for (const { bytes, buf: b } of pending) {
+          feedStreamPcm(idx, bytes, b)
+        }
+      }
+      if (ttsPlayingIdx === idx) {
+        // 正在播放的句子 chunkEnd → 等音频播完后自动推进下一句
+        finishTtsStreamPlayer(idx)
+      } else {
+        // 还没轮到播放的句子 chunkEnd → 标记已就绪，等轮到时再处理
+        ttsSentenceReady.add(idx)
+      }
       ttsBuffers.delete(idx)
       return
     }
@@ -798,8 +913,25 @@ const handleTtsEvent = (payload) => {
 }
 
 /**
+ * 把 IEEE float32 LE PCM 直接灌进 AudioBuffer（Astra TTS 引擎输出格式）。
+ * float32 值域 [-1.0, 1.0]，直接写入 AudioBuffer 的 Float32Array。
+ */
+const pcmFloat32ToAudioBuffer = (ctx, pcmBytes, sampleRate, channels) => {
+  const sampleCount = Math.floor(pcmBytes.length / 4 / channels)
+  const audioBuf = ctx.createBuffer(channels, sampleCount, sampleRate)
+  const view = new DataView(pcmBytes.buffer, pcmBytes.byteOffset, pcmBytes.byteLength)
+  for (let ch = 0; ch < channels; ch++) {
+    const channelData = audioBuf.getChannelData(ch)
+    for (let i = 0; i < sampleCount; i++) {
+      channelData[i] = view.getFloat32((i * channels + ch) * 4, true)
+    }
+  }
+  return audioBuf
+}
+
+/**
  * 把 int16 LE 单声道 PCM 直接灌进 AudioBuffer，零解码开销。
- * 不再走 decodeAudioData（GPT-SoVITS 的 streaming wav 多 RIFF header 会让它崩）。
+ * 不再走 decodeAudioData（旧 GPT-SoVITS 的 streaming wav 多 RIFF header 会让它崩）。
  */
 const pcmInt16ToAudioBuffer = (ctx, pcmBytes, sampleRate, channels) => {
   const sampleCount = Math.floor(pcmBytes.length / 2 / channels)
@@ -825,8 +957,8 @@ const pumpAudioQueue = () => {
   if (!item) return
   audioPlaying = true
   try {
-    // WAV 格式（MLX-Audio 引擎）：走 decodeAudioData 解码
-    // pcm_s16le 格式（GPT-SoVITS 引擎）：直接灌 AudioBuffer，零解码开销
+    // WAV 格式：走 decodeAudioData 解码
+    // pcm_s16le 格式（Astra TTS 引擎）：直接灌 AudioBuffer，零解码开销
     const decodeAndPlay = (audioBuf) => {
       const src = ctx.createBufferSource()
       src.buffer = audioBuf
@@ -844,7 +976,7 @@ const pumpAudioQueue = () => {
     }
 
     if (item.format === 'wav') {
-      // MLX-Audio 返回完整 WAV，用 decodeAudioData 解码
+      // 完整 WAV 文件，用 decodeAudioData 解码
       ctx.decodeAudioData(item.pcm.buffer.slice(item.pcm.byteOffset, item.pcm.byteOffset + item.pcm.byteLength))
         .then(decodeAndPlay)
         .catch(e => {
@@ -854,8 +986,10 @@ const pumpAudioQueue = () => {
           pumpAudioQueue()
         })
     } else {
-      // raw PCM (pcm_s16le)：直接灌 AudioBuffer
-      const audioBuf = pcmInt16ToAudioBuffer(ctx, item.pcm, item.sampleRate, item.channels)
+      // raw PCM (pcm_s16le / pcm_f32le)：直接灌 AudioBuffer
+      const audioBuf = item.format === 'pcm_f32le'
+        ? pcmFloat32ToAudioBuffer(ctx, item.pcm, item.sampleRate, item.channels)
+        : pcmInt16ToAudioBuffer(ctx, item.pcm, item.sampleRate, item.channels)
       decodeAndPlay(audioBuf)
     }
   } catch (e) {
@@ -881,6 +1015,11 @@ const stopCurrentAudio = () => {
   for (const idx of [...ttsStreamPlayers.keys()]) {
     stopTtsStreamPlayer(idx)
   }
+  // 清理串行播放队列
+  ttsSentenceQueue.length = 0
+  ttsPlayingIdx = null
+  ttsPendingChunks.clear()
+  ttsSentenceReady.clear()
   live2dController.stopLipSync()
 }
 

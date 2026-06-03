@@ -30,6 +30,31 @@ mcp:
     # 启动命令的前缀（逗号分隔）；默认 java -jar，可改为 java,-Xmx256m,-jar 等
     java-args: "java,-jar"
 
+memos:
+  enabled: true
+  base-url: http://localhost:8000
+  api-key: ""
+  connect-timeout-ms: 3000
+  read-timeout-ms: 8000
+  # 固定的 Memos user_id（UUID 格式）—— 纯个人项目，所有对话共享同一用户
+  user-id: "8736b16e-1d20-4163-980b-a5063c3facdc"
+  # 搜索 top_k：Memos 默认 10，比旧值 3 大以利用 Memos 的去重和排序
+  search-top-k: 10
+  async-mode: async
+  # writable/readable cube IDs：对应 Memos 的记忆隔离容器，逗号分隔
+  # 从 Memos curl 测试用例中获取的 cube_id
+  writable-cube-ids: "b32d0977-435d-4828-a86f-4f47f8b55bca"
+  readable-cube-ids: "b32d0977-435d-4828-a86f-4f47f8b55bca"
+  # 搜索模式：fast（快，仅 working_memory）/ fine（精细，全量 vector+graph）/ mixture（混合，推荐）
+  search-mode: mixture
+  # 相关性阈值：低于此值的记忆不返回，0 = 不过滤
+  relativity: 0.4
+  # 是否包含用户偏好记忆
+  include-preference: true
+  pref-top-k: 6
+  role-filter-enabled: false
+  fallback-to-rag: true
+
 rag:
   chunk-size: 500
   chunk-overlap: 80
@@ -74,31 +99,15 @@ voice:
   asr-language: auto
   asr-timeout-ms: 15000
   # ---------------- TTS 引擎 ----------------
-  # 引擎选择：gpt-sovits | mlx-audio（默认，Qwen3-TTS + MLX 原生加速）
-  tts-engine: gpt-sovits
-  # GPT-SoVITS api_v2 base-url（端口 9880）
-  tts-base-url: http://127.0.0.1:9880
-  # MLX-Audio API base-url（端口 9881，OpenAI 兼容 /v1/audio/speech）
-  mlx-audio-base-url: http://127.0.0.1:9881
-  # MLX-Audio 模型 ID
-  mlx-audio-model: mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16
-  # MLX-Audio 输出采样率（Qwen3-TTS=24000，GPT-SoVITS v2Pro=48000，前端需动态适配）
-  mlx-audio-sample-rate: 24000
-  # MLX 模型侧流式：false 时 TTFB≈整句合成时间；true 时首包约 1–2s（克隆参考音）
-  mlx-audio-stream: true
-  # 每段音频时长（秒）；越小首包越快，过小可能略损连贯性
-  mlx-audio-streaming-interval: 0.5
-  # false=黍 ref_audio 克隆；true=内置音色（仅测速）
-  mlx-audio-use-preset-voice: false
-  mlx-audio-preset-voice: Chelsie
-  # 后端启动时 POST /v1/audio/warm-voice 预热参考音缓存
-  mlx-audio-warm-on-start: true
-  # 首次调用前是否自动尝试切换一次权重（只切一次，避免每次请求都切）
-  tts-auto-switch-weights: true
-  # 流式块大小：1=最高音质（不流式）/ 2=中等（流式，不强切）/ 3=最快（流式 + 定长硬切，会断词）
-  # 实测 3 会切碎词导致吐字含糊，2 是音质/速度的最佳平衡，详见 PLAN-007
-  tts-streaming-mode: 2
-  # 单次 TTS 超时（毫秒），整段最长合成时间
+  # Astra (Genie-TTS) 部署在 Win :5000，流式返回 raw PCM 32kHz
+  tts-engine: astra
+  # Astra TTS 服务基础 URL（Win 主机）
+  astra-tts-base-url: http://192.168.124.2:5000
+  # 默认 avatarId（兜底音色，Astra 服务端已配置）
+  astra-default-avatar-id: chenxing
+  # 流式分片大小（chunkSize 参数）
+  astra-streaming-chunk-size: 2048
+  # 单次 TTS 超时（毫秒）
   tts-timeout-ms: 60000
   # 默认音色 profile（当角色卡 voice_id 没匹配到 profile 时用这个）
   tts-default-profile: shu
@@ -106,30 +115,13 @@ voice:
   tts-profiles:
     shu:
       display-name: "黍（默认）"
-      # 参考音频：绝对路径，GPT-SoVITS 服务端读取本机文件
-      # 路径指向 GPT-SoVITS 服务进程能访问到的本机绝对路径
-      # 后端启动时 user.dir = .../AI-chat/backend，因此用 ../services/gpt-sovits/v4/... 回到项目根再进 services
-      ref-audio-path: ${user.dir}/../services/gpt-sovits/v4/黍/reference_audios/中文/emotions/【默认】让我看看我带来的这些渔具放到哪里好呢？.wav
-      prompt-text: "让我看看我带来的这些渔具放到哪里好呢？"
-      prompt-lang: zh
+      # Astra avatarId：对应 Win 上 TTS 服务注册的音色
+      astra-avatar-id: Shu_v2proplus
       text-lang: zh
-      # 训练出来的 GPT / SoVITS 权重（绝对路径），后端启动后会调用 /set_gpt_weights & /set_sovits_weights 切换
-      # 注意：当前 GPT-SoVITS 服务侧的底模是 v2Pro（见 GPT-SoVITS/GPT_SoVITS/configs/tts_infer.yaml），
-      # 黍的 v4 LoRA 权重直接挂到 v2Pro 底模上跑，速度快很多（详见 PLAN-007）
-      gpt-weights: ${user.dir}/../services/gpt-sovits/v4/黍/黍-e10.ckpt
-      sovits-weights: ${user.dir}/../services/gpt-sovits/v4/黍/黍_e10_s190_l32.pth
-      # 推理参数严格对齐 GPT-SoVITS webui "1C-推理" 页设置（详见 .joycode/memory/feedback_tts_params.md）
-      # webui 截图实测：top_k=15, top_p=1, temperature=1, 语速=1, 句间停顿=0.3, 采样步数=8, 切分=凑四句一切
-      top-k: 15
-      top-p: 1.0
-      temperature: 1.0
       speed-factor: 1.0
-      fragment-interval: 0.3
-      # v2Pro 关键：sample_steps webui 用 8，api_v2 默认 32 —— 漏传/用 32 会慢 4 倍 + 音色漂
-      sample-steps: 8
-      # "凑四句一切" 对应 cut1（cut5 是按标点切，会让黍模型断句异常）
-      text-split-method: cut1
-    # 兜底：角色卡里预置的 voice_id (liuli_v1/xingye_v1/k_v1) 暂时都复用黍
+      temperature: 1.0
+      top-k: 15
+    # 兜底：角色卡里预置的 voice_id 暂时都复用黍
     liuli_v1: { display-name: "琉璃(复用黍)", alias-of: shu }
     xingye_v1: { display-name: "星野(复用黍)", alias-of: shu }
     k_v1: { display-name: "赛博K(复用黍)", alias-of: shu }

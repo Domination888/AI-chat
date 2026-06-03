@@ -91,6 +91,12 @@ class Live2DController {
    * 触发动作
    * @param {{group: string, index: number}} motionConfig
    * @param {boolean} [muteSound=false] 是否静音（LLM调用时应静音，避免和TTS冲突）
+   *
+   * 注意：muteSound=true 时不恢复 config.sound，因为 model.motion() 内部是异步
+   * 加载/播放声音的，finally 中立即恢复会导致声音在恢复后才播放出来。
+   * config.sound 会在以下时机恢复：
+   *   - 用户手动点击模型触发动作时（Live2DOverlay.playMotion 设置 config.sound = true）
+   *   - 对话结束时 onConversationEnd() 恢复
    */
   triggerMotion(motionConfig, muteSound = false) {
     if (!this.model || !motionConfig) return
@@ -102,12 +108,8 @@ class Live2DController {
       console.log('[Live2DController] motion:', motionConfig.group, motionConfig.index, muteSound ? '(muted)' : '')
     } catch (e) {
       console.warn('[Live2DController] motion failed:', motionConfig, e)
-    } finally {
-      // 动作开始后立即恢复 config.sound，不影响后续用户点击
-      if (muteSound) {
-        config.sound = true
-      }
     }
+    // 不再在 finally 中恢复 config.sound，避免异步声音泄漏
   }
 
   /**
@@ -290,12 +292,13 @@ class Live2DController {
 
   /**
    * 对话结束后恢复默认状态
-   * 延迟 2s 后恢复默认表情 + 停止口型
+   * 延迟 2s 后恢复默认表情 + 停止口型 + 恢复动作音效
    */
   onConversationEnd() {
     setTimeout(() => {
       this.stopLipSync()
       this.resetExpression()
+      // 不恢复动作音效（已全局禁用 Live2D 动作声音，只保留动作）
     }, 2000)
   }
 }

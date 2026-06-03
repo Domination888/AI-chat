@@ -20,15 +20,7 @@ fi
 echo "🎤 Starting SenseVoice ASR service..."
 cd "$PROJECT_ROOT/services/sense-voice"
 python server.py > "$LOG_DIR/asr/app.log" 2>&1 &
-ASR_PID=$!
 cd "$PROJECT_ROOT"
-
-# 保存PID（单一 pids.txt）
-if [ -f "$PID_FILE" ]; then
-    grep -v "^asr " "$PID_FILE" > "$PID_FILE.tmp" || true
-    mv "$PID_FILE.tmp" "$PID_FILE"
-fi
-echo "asr $ASR_PID" >> "$PID_FILE"
 
 # 等待启动
 echo "⏳ Waiting for ASR service to start..."
@@ -42,3 +34,13 @@ else
     echo "❌ ASR service failed to start. Check $LOG_DIR/asr/app.log"
     exit 1
 fi
+
+# 抓真实监听 PID（python 一般 $! 即真身，但仍以端口为准更稳）
+ASR_PID=$(lsof -nP -iTCP:$ASR_PORT -sTCP:LISTEN -t 2>/dev/null | sort -n | head -1)
+
+# 保存PID（单一 pids.txt）
+if [ -f "$PID_FILE" ]; then
+    grep -v "^asr " "$PID_FILE" > "$PID_FILE.tmp" || true
+    mv "$PID_FILE.tmp" "$PID_FILE"
+fi
+[ -n "$ASR_PID" ] && echo "asr $ASR_PID" >> "$PID_FILE"

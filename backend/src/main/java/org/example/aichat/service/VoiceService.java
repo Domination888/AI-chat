@@ -15,14 +15,14 @@ public interface VoiceService {
 
     /**
      * 一次性 TTS：返回完整 wav 字节流。
-     * 内部仍使用 GPT-SoVITS streaming_mode 协议（边产生边收），但合并成一个 wav 后再返回。
+     * 内部仍使用流式协议（边产生边收），但合并成一个 wav 后再返回。
      * 用途：兼容旧的 /api/audio/chat 阻塞接口。
      */
     InputStream tts(String text, String voiceId);
 
     /**
-     * 真·流式 TTS：边收 GPT-SoVITS 输出的 wav 字节，边通过 chunkConsumer 推给上游。
-     * chunkConsumer 接收的每一块都是 raw bytes（拼接后是一个完整的 wav 文件）。
+     * 真·流式 TTS：边收 TTS 输出的字节，边通过 chunkConsumer 推给上游。
+     * chunkConsumer 接收的每一块都是 raw bytes（拼接后是一个完整的音频流）。
      *
      * @return 实际写出的总字节数；<=0 表示失败
      */

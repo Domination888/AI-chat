@@ -1,11 +1,11 @@
 # 硬件配置 & 服务部署位置（项目固定约束）
 
 > 本文件是所有规划/编码任务必须遵守的硬件与部署事实。任何 PLAN 或代码方案都应以此为前提。
-> 最近一次修订：2026-05（LLM 升级到 Gemma4-31B，Embedding 明确常驻 Mac）
+> 最近一次修订：2026-05（TTS 迁移到 Win Astra/Genie-TTS）
 
 ## 硬件配置
 
-### Mac（开发主机 + 业务后端 + ASR + TTS + Embedding）
+### Mac（开发主机 + 业务后端 + ASR + Embedding）
 - 芯片：**Apple M4**（ARM 架构，集成 CPU + GPU + ANE）
 - 统一内存：**32GB**（CPU/GPU/ANE 共享）
 - 操作系统：macOS（darwin 15.5+）
@@ -18,7 +18,7 @@
   - ❌ MPS 对部分大模型算子兼容性不全
   - ✅ 跑 whisper.cpp / MLX / Core ML 类项目原生加速，性能强
 
-### Win（GPU 推理盒子，仅跑 LLM）
+### Win（GPU 推理盒子 + TTS，跑 LLM + Astra TTS）
 - 显卡：**NVIDIA RTX 4070 Ti SUPER，16GB 显存**（已被 LLM 吃满）
 - 内存：48GB
 - LLM：**Gemma4-31B Dense（量化版，Apache 2.0）**
@@ -27,7 +27,7 @@
   - 4070 Ti S 16GB 跑量化版（GGUF Q4_K_M / Q5_K_M）已把显存吃满
 - 关键约束：
   - ⚠️ **显存已被 Gemma4-31B 占满**，不可再叠加任何 GPU 服务（包括 Embedding、ASR、Reranker）
-  - ⚠️ Win 仅作为 LLM 推理服务器，**不要往上塞 ASR / TTS / Embedding**
+  - ⚠️ Win 仅作为 LLM 推理 + TTS 服务，**不要往上塞 ASR / Embedding**
   - ⚠️ LM Studio 部署时 **context length 建议设 8K，而不是 12K/256K**（理由见下）
 
 ## 服务部署位置（强约束）
@@ -38,7 +38,7 @@
 | 后端 Spring Boot (:8080) | Mac | 业务侧 |
 | **LLM（LM Studio :1234，Gemma4-31B）** | **Win** | 唯一有 NVIDIA GPU；显存已占满 |
 | **ASR** | **Mac** | Win 显存被 LLM 占满；M4 ANE 跑 Whisper 性能足 |
-| **TTS（GPT-SoVITS :9880）** | Mac | 轻量、本机播放低延迟 |
+| **TTS（Astra/Genie-TTS :5000）** | **Win** | TTS 已迁移到 Win；Astra CPU 推理，不占 GPU 显存 | 轻量、本机播放低延迟 |
 | MySQL / Redis | Mac | 业务侧 |
 | **Embedding（RAG 用，常驻服务）** | **Mac** | Win 显存被 LLM 占满；后端每次 query 都要算 embedding，不能临时加载 |
 
@@ -59,14 +59,14 @@
 Mac (M4, 32GB)                       Win (4070 Ti S, 16GB 显存吃满)
 ├─ 前端 Vue3        :5173            └─ LM Studio (Gemma4-31B Q4/Q5) :1234
 ├─ 后端 SpringBoot  :8080                  ctx_len=8K（项目实际需求 << 256K）
-├─ ASR (本机)       :9000
-├─ TTS GPT-SoVITS   :9880
-├─ Embedding (本机) :*               
-├─ MySQL/Redis
+├─ ASR (本机)       :9000             ├─ Astra TTS (Genie-TTS, CPU) :5000
+├─ Embedding (本机) :*                     samplingRate=32000Hz
+├─ MySQL/Redis                           └─ 音色：chenxing, Shu_v2proplus
 └─ ...
 
-唯一跨机调用：
+跨机调用：
   Mac 后端 ──HTTP SSE──▶ Win LM Studio (192.168.x.x:1234/v1)
+  Mac 后端 ──HTTP GET───▶ Win Astra TTS  (192.168.x.x:5000/api/tts/predict-stream)
 ```
 
 ## LLM 上下文长度策略（Gemma4 部署侧）
@@ -86,7 +86,7 @@ Mac (M4, 32GB)                       Win (4070 Ti S, 16GB 显存吃满)
 
 ## 选型铁律（给后续所有规划的硬性输入）
 1. **不要在 Win 上加任何 GPU 占用服务**（显存已满）
-2. **Mac 端 ASR/TTS/Embedding 必须优先选支持 Apple Silicon 加速（Core ML / MLX / Metal）的方案**
+2. **Mac 端 ASR/Embedding 必须优先选支持 Apple Silicon 加速（Core ML / MLX / Metal）的方案**（TTS 已迁到 Win，Mac 不跑 TTS）
 3. **避免大于 ~3B 的模型在 Mac 上做实时推理**，统一内存 32GB 还要留给业务后端 + 前端开发 + 浏览器 + IDE
 4. **跑不动就退到云 API**（DashScope / OpenAI 兼容），不要硬塞本地
 5. **API 调用方式下不要追求大上下文**：上下文由后端管理，Win LM Studio ctx_len = 8K

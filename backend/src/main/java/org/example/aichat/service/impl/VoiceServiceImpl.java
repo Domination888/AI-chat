@@ -64,8 +64,8 @@ public class VoiceServiceImpl implements VoiceService {
         String engine = voiceProps.getTtsEngine();
         TtsStrategy strategy = strategyMap.get(engine);
         if (strategy == null) {
-            log.warn("未知的 TTS 引擎: {}，回退到 gpt-sovits", engine);
-            strategy = strategyMap.get("gpt-sovits");
+            log.warn("未知的 TTS 引擎: {}，回退到 astra", engine);
+            strategy = strategyMap.get("astra");
         }
         return strategy;
     }
@@ -150,6 +150,6 @@ public class VoiceServiceImpl implements VoiceService {
 
     @Override
     public String currentTtsFormat() {
-        return currentStrategy().isRawPcmOutput() ? "pcm_s16le" : "wav";
+        return currentStrategy().pcmFormat();
     }
 }

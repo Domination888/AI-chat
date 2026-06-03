@@ -463,8 +463,8 @@ public class ChatController {
                     ev.put("format", fmt);
                     ev.put("sampleRate", voiceService.currentTtsSampleRate());
                     ev.put("channels", 1);
-                    // MLX 流式 PCM：前端按 chunk 边收边播，不必等 chunkEnd
-                    if ("pcm_s16le".equals(fmt)) {
+                    // 流式 PCM：前端按 chunk 边收边播，不必等 chunkEnd
+                    if (!"wav".equals(fmt)) {
                         ev.put("streamPlay", true);
                     }
                 }

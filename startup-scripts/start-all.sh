@@ -66,39 +66,49 @@ check_service() {
     return 1
 }
 
+# 抓取端口上的真实监听 PID（处理 mvnw / npm 这类 wrapper 进程，$! 不是真身的情况）
+# 用法：pid=$(resolve_port_pid 8080)
+resolve_port_pid() {
+    local port=$1
+    # 取 LISTEN 状态的最早 PID（多个时按 PID 升序，通常是父监听进程）
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | sort -n | head -1
+}
+
 # 启动后端
 start_backend() {
     check_and_kill_port 8080
-    
+
     echo "📦 Starting Spring Boot backend..."
     cd "$PROJECT_ROOT/backend"
     ./mvnw spring-boot:run > "$LOG_DIR/backend/app.log" 2>&1 &
-    BACKEND_PID=$!
     cd "$PROJECT_ROOT"
-    
+
     if ! check_service "http://localhost:8080/api/health" "Backend"; then
         echo "❌ Backend failed to start. Check $LOG_DIR/backend/app.log"
         return 1
     fi
+    # mvnw 是 wrapper，真正监听 8080 的是 spawn 出来的 java 进程
+    BACKEND_PID=$(resolve_port_pid 8080)
 }
 
 # 启动前端
 start_frontend() {
     check_and_kill_port 3000
-    
+
     echo "🎨 Starting Vite frontend server..."
     cd "$PROJECT_ROOT/client/src"
     npm run dev > "$LOG_DIR/frontend/app.log" 2>&1 &
-    FRONTEND_PID=$!
     cd "$PROJECT_ROOT"
-    
+
     if ! check_service "http://localhost:3000" "Frontend"; then
         echo "❌ Frontend failed to start. Check $LOG_DIR/frontend/app.log"
         return 1
     fi
+    # npm 是 wrapper，真正监听 3000 的是 vite/esbuild 子进程
+    FRONTEND_PID=$(resolve_port_pid 3000)
 }
 
-# 启动Electron客户端
+# 启动Electron客户端（无监听端口，用 $! 即可）
 start_client() {
     echo "🖥️  Starting Electron client..."
     cd "$PROJECT_ROOT/client"
@@ -111,49 +121,29 @@ start_client() {
 # 启动ASR服务
 start_asr() {
     check_and_kill_port 9000
-    
+
     echo "🎤 Starting SenseVoice ASR service..."
     cd "$PROJECT_ROOT/services/sense-voice"
     python server.py > "$LOG_DIR/asr/app.log" 2>&1 &
-    ASR_PID=$!
     cd "$PROJECT_ROOT"
-    
+
     if ! check_service "http://localhost:9000/healthz" "ASR Service"; then
         echo "❌ ASR service failed to start. Check $LOG_DIR/asr/app.log"
         return 1
     fi
+    # python server.py 一般 $! 即真身，但仍以端口为准更稳
+    ASR_PID=$(resolve_port_pid 9000)
 }
 
-# 启动TTS服务
+# 启动TTS服务（已迁移到 Win，仅做健康检查）
 start_tts() {
-    # 从 application-local.yml 读取 tts-engine 配置
-    local tts_engine="gpt-sovits"
-    local config_file="$PROJECT_ROOT/backend/src/main/resources/application-local.yml"
-    if [ -f "$config_file" ]; then
-        local engine_line=$(grep -E '^\s*tts-engine:' "$config_file" 2>/dev/null | head -1)
-        if [ -n "$engine_line" ]; then
-            tts_engine=$(echo "$engine_line" | sed 's/.*tts-engine:[[:space:]]*//' | tr -d '"' | tr -d "'")
-        fi
-    fi
-
-    echo "🔊 Starting TTS service (engine=$tts_engine)..."
-    local tts_script="$PROJECT_ROOT/startup-scripts/start-tts.sh"
-    if [ -f "$tts_script" ]; then
-        bash "$tts_script" --engine "$tts_engine"
-        # 根据引擎选择端口
-        local tts_port=9880
-        if [ "$tts_engine" = "mlx-audio" ]; then
-            tts_port=9881
-        fi
-        TTS_PID=$(lsof -i :$tts_port -sTCP:LISTEN -t 2>/dev/null | head -1 || true)
-        if [ -n "$TTS_PID" ]; then
-            echo "✅ TTS service is running on port $tts_port (engine=$tts_engine, PID: $TTS_PID)"
-        else
-            echo "⚠️  TTS port $tts_port not yet listening, may still be loading..."
-        fi
+    local tts_url="http://192.168.124.2:5000/api/tts/status"
+    echo "🔊 Checking Astra TTS service on Win..."
+    if curl -s --max-time 5 "$tts_url" > /dev/null 2>&1; then
+        echo "✅ Astra TTS service is reachable on Win (:5000)"
     else
-        echo "⚠️  TTS start script not found: $tts_script"
-        echo "   Skipping TTS service."
+        echo "⚠️  Astra TTS service not reachable at $tts_url"
+        echo "   Make sure the TTS service is running on Win."
     fi
 }
 
@@ -164,7 +154,7 @@ show_status() {
     echo "📱 Frontend: http://localhost:3000"
     echo "🔧 Backend: http://localhost:8080/api/health"
     echo "🎤 ASR: http://localhost:9000/healthz"
-    echo "🔊 TTS: http://localhost:9880/9881 (engine-dependent)"
+    echo "🔊 TTS: http://192.168.124.2:5000 (Astra on Win)"
     echo "🖥️  Electron: Desktop app should appear"
     echo ""
     echo "📊 Unified Logs Location: $LOG_DIR/"
@@ -172,7 +162,7 @@ show_status() {
     echo "   Frontend: $LOG_DIR/frontend/app.log"
     echo "   Client: $LOG_DIR/client/app.log"
     echo "   ASR: $LOG_DIR/asr/app.log"
-    echo "   TTS: $LOG_DIR/tts/gpt-sovits.log / $LOG_DIR/tts/mlx-audio/server.log"
+    echo "   TTS: remote Astra service on Win (no local log)"
     echo ""
     echo "🛑 To stop all services: Press Ctrl+C or run kill \$(awk '{print \$2}' $PID_FILE)"
     echo "   Or use: ./startup-scripts/stop-all.sh"
