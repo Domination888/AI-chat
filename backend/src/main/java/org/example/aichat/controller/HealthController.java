@@ -1,7 +1,9 @@
 package org.example.aichat.controller;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
+import org.example.aichat.config.LlmProperties;
+import org.example.aichat.config.VoiceProperties;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -17,17 +19,16 @@ import java.util.Map;
 
 /**
  * 健康检查接口，用于验证骨架 / 跨机依赖是否正常。
+ * 探测地址读取运行时配置（支持热更新）。
  */
 @Slf4j
 @RestController
 @RequestMapping("/api/health")
+@RequiredArgsConstructor
 public class HealthController {
 
-    @Value("${llm.base-url}")
-    private String llmBaseUrl;
-
-    @Value("${voice.asr-url}")
-    private String asrUrl;
+    private final LlmProperties llmProperties;
+    private final VoiceProperties voiceProperties;
 
     private final HttpClient probe = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(3))
@@ -42,21 +43,29 @@ public class HealthController {
         );
     }
 
-    /**
-     * 自检 Win LM Studio：GET {llm.base-url}/models
-     */
+    /** 自检 LLM：GET {llm.base-url}/models */
     @GetMapping("/llm")
     public Map<String, Object> llm() {
-        return probeHttp(llmBaseUrl + "/models");
+        return probeHttp(llmProperties.getBaseUrl() + "/models");
     }
 
-    /**
-     * 自检本机 SenseVoice：GET http://127.0.0.1:9000/healthz
-     */
+    /** 自检 ASR：GET {asr-url 去掉路径}/healthz */
     @GetMapping("/asr")
     public Map<String, Object> asr() {
+        String asrUrl = voiceProperties.getAsrUrl();
         String base = asrUrl.replaceAll("/v1/audio/transcriptions$", "");
         return probeHttp(base + "/healthz");
+    }
+
+    /** 自检 TTS：GET {astra-tts-base-url}/health 或根路径 */
+    @GetMapping("/tts")
+    public Map<String, Object> tts() {
+        String base = voiceProperties.getAstraTtsBaseUrl();
+        Map<String, Object> health = probeHttp(base + "/health");
+        if (Boolean.TRUE.equals(health.get("ok"))) {
+            return health;
+        }
+        return probeHttp(base + "/");
     }
 
     private Map<String, Object> probeHttp(String url) {

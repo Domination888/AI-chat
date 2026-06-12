@@ -4,11 +4,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.aichat.dto.ChatRequest;
+import org.example.aichat.dto.LatencyClientReport;
 import org.example.aichat.service.ChatService;
 import org.example.aichat.service.SentenceSplitter;
 import org.example.aichat.service.SinkRegistry;
 import org.example.aichat.service.ProactiveChatService;
 import org.example.aichat.service.VoiceService;
+import org.example.aichat.util.LatencyLogger;
+import org.example.aichat.util.LatencyTrace;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.util.CollectionUtils;
@@ -28,6 +31,7 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -38,7 +42,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  *   event: emotion  data: {"emotion":"开心"}           — LLM 输出中的情绪标签
  *   event: text    data: {"delta":"模型新token"}       — LLM 流式文本（已剥离情绪标签）
  *   event: tts     data: {"idx":N,"seq":S,...}          — 句子级 TTS 音频 chunk
- *   event: done    data: {}                             — 流结束
+ *   event: done    data: {"traceId":"..."}                  — 流结束（含延迟追踪 ID）
  *   event: error   data: {"message":"..."}              — 错误
  */
 @Slf4j
@@ -51,6 +55,7 @@ public class ChatController {
     private final VoiceService voiceService;
     private final SinkRegistry sinkRegistry;
     private final ProactiveChatService proactiveChatService;
+    private final LatencyLogger latencyLogger;
     private final ObjectMapper om = new ObjectMapper();
 
     private static final int MAX_IMAGE_COUNT = 5;
@@ -68,6 +73,10 @@ public class ChatController {
     @PostMapping(produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> chat(@RequestBody ChatRequest request) {
         validateRequest(request);
+
+        LatencyTrace trace = latencyLogger.startTrace(
+                request.getConversationId(), request.getInputMode(), request.getClientSentAt());
+        request.setLatencyTrace(trace);
 
         Sinks.Many<ServerSentEvent<String>> sink = Sinks.many().unicast().onBackpressureBuffer();
         String conversationId = request.getConversationId();
@@ -92,9 +101,6 @@ public class ChatController {
                 .doOnCancel(() -> sinkRegistry.unregister(conversationId));
     }
 
-    /**
-     * 打断指定对话的 SSE 流：前端用户新发消息时调用，取消上一轮 LLM 生成 + TTS 播放
-     */
     @PostMapping("/interrupt")
     public Map<String, Object> interrupt(@RequestBody Map<String, String> body) {
         String conversationId = body.get("conversationId");
@@ -103,6 +109,16 @@ public class ChatController {
         }
         boolean interrupted = sinkRegistry.interrupt(conversationId);
         return Map.of("success", true, "interrupted", interrupted);
+    }
+
+    /** 前端全链路延迟上报（SSE 结束 + TTS 播放完成后合并写入 latency.log） */
+    @PostMapping("/latency")
+    public Map<String, Object> reportLatency(@RequestBody LatencyClientReport report) {
+        if (report.getTraceId() == null || report.getTraceId().isBlank()) {
+            return Map.of("success", false, "message", "traceId 不能为空");
+        }
+        latencyLogger.mergeClientSteps(report.getTraceId(), report.getSteps());
+        return Map.of("success", true);
     }
 
     // ==========================================================
@@ -197,14 +213,17 @@ public class ChatController {
      * 语音输入：先 ASR → 再走 LLM 流式 + TTS 回播
      */
     private void handleAudioInput(ChatRequest request, Sinks.Many<ServerSentEvent<String>> sink) {
+        LatencyTrace trace = request.getLatencyTrace();
         Schedulers.boundedElastic().schedule(() -> {
             try {
+                if (trace != null) trace.mark("asr_start");
                 // 1) ASR：把 base64 音频解码，调用 VoiceService
                 byte[] audioBytes = Base64.getDecoder().decode(request.getAudioBase64());
                 String ext = request.getAudioFormat() != null ? request.getAudioFormat() : "webm";
                 MultipartFile audioFile = new ByteArrayMultipartFile(audioBytes, "file", "audio." + ext, "audio/webm");
 
                 String userText = voiceService.asr(audioFile, request.getAsrHotwords(), request.getAsrLanguage());
+                if (trace != null) trace.mark("asr_done");
                 if (userText == null || userText.trim().isEmpty()) {
                     sink.tryEmitNext(sse("error", json("message", "无法识别音频内容")));
                     sink.tryEmitComplete();
@@ -369,10 +388,17 @@ public class ChatController {
         Double speedFactor = request.getTtsSpeedFactor();
         Double pitchFactor = request.getTtsPitchFactor();
         boolean wantTts = StringUtils.hasText(voiceId);
+        LatencyTrace trace = request.getLatencyTrace();
+        if (trace != null) {
+            trace.meta("wantTts", wantTts);
+        }
 
         // 语音场景优先首包速度：缩短最小句长
         SentenceSplitter splitter = wantTts ? new SentenceSplitter(6, 60) : null;
         AtomicInteger ttsIdx = new AtomicInteger(0);
+        AtomicInteger ttsSentenceCount = new AtomicInteger(0);
+        AtomicBoolean sseFirstText = new AtomicBoolean(false);
+        AtomicBoolean sseFirstTts = new AtomicBoolean(false);
 
         Flux<String> llmFlux = chatService.chatStream(request);
 
@@ -390,13 +416,17 @@ public class ChatController {
                     // 情绪标签提取与剥离（跨 token 缓冲）：后端剥离，前端收到的 text delta 已不含标签
                     String cleanToken = emotionBuf.process(token);
                     if (!cleanToken.isEmpty()) {
+                        if (trace != null && sseFirstText.compareAndSet(false, true)) {
+                            trace.mark("sse_first_text");
+                        }
                         // 文本流：推给前端（纯文本，不含情绪标签）
                         sink.tryEmitNext(sse("text", json("delta", cleanToken)));
                         // 如果需要 TTS，攒句子（用纯文本）
                         if (wantTts && splitter != null) {
                             List<String> sentences = splitter.append(cleanToken);
                             for (String s : sentences) {
-                                emitTts(sink, s, voiceId, speedFactor, pitchFactor, ttsIdx.getAndIncrement());
+                                emitTts(sink, s, voiceId, speedFactor, pitchFactor,
+                                        ttsIdx.getAndIncrement(), trace, sseFirstTts, ttsSentenceCount);
                             }
                         }
                     }
@@ -405,25 +435,42 @@ public class ChatController {
                     // 刷出情绪标签缓冲区残余内容
                     String emotionFlush = emotionBuf.flush();
                     if (!emotionFlush.isEmpty()) {
+                        if (trace != null && sseFirstText.compareAndSet(false, true)) {
+                            trace.mark("sse_first_text");
+                        }
                         sink.tryEmitNext(sse("text", json("delta", emotionFlush)));
                         if (wantTts && splitter != null) {
                             List<String> sentences = splitter.append(emotionFlush);
                             for (String s : sentences) {
-                                emitTts(sink, s, voiceId, speedFactor, pitchFactor, ttsIdx.getAndIncrement());
+                                emitTts(sink, s, voiceId, speedFactor, pitchFactor,
+                                        ttsIdx.getAndIncrement(), trace, sseFirstTts, ttsSentenceCount);
                             }
                         }
                     }
                     if (wantTts && splitter != null) {
                         String tail = splitter.flushRemainder();
                         if (tail != null && !tail.isBlank()) {
-                            emitTts(sink, tail, voiceId, speedFactor, pitchFactor, ttsIdx.getAndIncrement());
+                            emitTts(sink, tail, voiceId, speedFactor, pitchFactor,
+                                    ttsIdx.getAndIncrement(), trace, sseFirstTts, ttsSentenceCount);
                         }
                     }
-                    sink.tryEmitNext(sse("done", "{}"));
+                    if (trace != null) {
+                        trace.meta("ttsSentences", ttsSentenceCount.get());
+                        latencyLogger.stageServerComplete(trace);
+                    }
+                    Map<String, Object> donePayload = new HashMap<>();
+                    if (trace != null) {
+                        donePayload.put("traceId", trace.getTraceId());
+                    }
+                    sink.tryEmitNext(sse("done", jsonObj(donePayload)));
                     sink.tryEmitComplete();
                 })
                 .doOnError(err -> {
                     log.error("chatStream LLM 失败", err);
+                    if (trace != null) {
+                        trace.meta("error", String.valueOf(err.getMessage()));
+                        latencyLogger.stageServerComplete(trace);
+                    }
                     sink.tryEmitNext(sse("error", json("message", String.valueOf(err.getMessage()))));
                     sink.tryEmitComplete();
                 })
@@ -439,16 +486,26 @@ public class ChatController {
      * 前端按 idx 归类、按 seq 顺序拼装 Blob 播放。
      */
     private void emitTts(Sinks.Many<ServerSentEvent<String>> sink,
-                         String sentence, String voiceId, Double speedFactor, Double pitchFactor, int idx) {
+                         String sentence, String voiceId, Double speedFactor, Double pitchFactor, int idx,
+                         LatencyTrace trace, AtomicBoolean sseFirstTts, AtomicInteger ttsSentenceCount) {
         final long t0 = System.currentTimeMillis();
         final AtomicInteger seq = new AtomicInteger(0);
         final long[] firstChunkCost = {-1};
+        if (trace != null) {
+            trace.mark("tts_" + idx + "_start");
+        }
         try {
             log.info("TTS sentence#{} start: {}", idx, abbr(sentence));
             long n = voiceService.ttsStreamWithFullParams(sentence, voiceId, speedFactor, pitchFactor, chunk -> {
                 int s = seq.getAndIncrement();
                 if (s == 0) {
                     firstChunkCost[0] = System.currentTimeMillis() - t0;
+                    if (trace != null) {
+                        trace.mark("tts_" + idx + "_first_chunk");
+                        if (sseFirstTts.compareAndSet(false, true)) {
+                            trace.mark("sse_first_tts_chunk");
+                        }
+                    }
                     log.info("TTS sentence#{} first-chunk: bytes={}, ttfb={}ms", idx, chunk.length, firstChunkCost[0]);
                 }
                 String b64 = Base64.getEncoder().encodeToString(chunk);
@@ -488,6 +545,11 @@ public class ChatController {
             tail.put("costMs", cost);
             tail.put("ttfbMs", firstChunkCost[0]);
             sink.tryEmitNext(sse("tts", jsonObj(tail)));
+            if (trace != null) {
+                trace.mark("tts_" + idx + "_done");
+                trace.mark("tts_last_done");
+            }
+            ttsSentenceCount.incrementAndGet();
             log.info("TTS sentence#{} done: bytes={}, chunks={}, ttfb={}ms, total={}ms",
                     idx, n, seq.get(), firstChunkCost[0], cost);
         } catch (Exception e) {

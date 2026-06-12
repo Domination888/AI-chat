@@ -16,6 +16,8 @@ public class RoleCard {
     private String voiceId;
     private String roleCode;
     private String personaCardPath;
+    /** Memos 记忆桶 cube_id；空则使用 application 全局 writable/readable-cube-ids */
+    private String memosCubeId;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

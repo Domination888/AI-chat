@@ -19,11 +19,6 @@ public interface HistoryMapper {
     List<History> findRecentByConversationId(@Param("conversationId") String conversationId,
                                              @Param("limit") int limit);
 
-    Integer sumTokenByConversationId(String conversationId);
-
-    void deleteOldest(@Param("conversationId") String conversationId,
-                      @Param("limit") int limit);
-
     void deleteByConversationId(@Param("conversationId") String conversationId);
 
     void deleteById(@Param("id") String id);

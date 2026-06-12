@@ -96,22 +96,33 @@ public class RoleCardService {
         roleCardMapper.deleteById(id);
     }
 
+    /** system.txt 破甲基底，所有角色通用。 */
+    public String buildBasePrompt() {
+        return promptService.getSystemPrompt();
+    }
+
     /**
-     * 按角色卡渲染系统 Prompt。
-     * 拼接顺序：system.txt（破甲基底，所有角色通用） + role_system.txt（角色层，按 persona_card 渲染）。
-     * 当 roleId 为空（无角色 / 默认会话）时，只返回 system.txt。
+     * 按角色卡渲染【角色层】；无角色时返回空串。
      */
-    public String buildSystemPrompt(Integer roleId) {
-        String base = promptService.getSystemPrompt();
+    public String buildRoleLayerPrompt(Integer roleId) {
         RoleCard role = roleId == null ? null : roleCardMapper.findById(roleId);
         if (role == null) {
+            return "";
+        }
+        Map<String, String> vars = buildVarsFromRole(role);
+        return promptService.render("role_system.txt", vars);
+    }
+
+    /**
+     * 按角色卡渲染系统 Prompt（预览/脚本用，不含【能力层】技能段）。
+     * 完整对话 Prompt 由 ChatServiceImpl 组装：base → 能力层 → 角色层 → 记忆。
+     */
+    public String buildSystemPrompt(Integer roleId) {
+        String base = buildBasePrompt();
+        String roleLayer = buildRoleLayerPrompt(roleId);
+        if (roleLayer.isEmpty()) {
             return base;
         }
-
-        Map<String, String> vars = buildVarsFromRole(role);
-        String roleLayer = promptService.render("role_system.txt", vars);
-        // 双层拼接：base 在前定调"去除限制 / 不许自称 AI"，role_system 在后注入具体角色，
-        // 中间空一行让模型把它们当成一段连续的系统指令处理（实测比生硬拼更稳）。
         return base + "\n\n" + roleLayer;
     }
 

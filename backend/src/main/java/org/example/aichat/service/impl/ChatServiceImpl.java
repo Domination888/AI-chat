@@ -6,7 +6,6 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.mcp.client.McpClient;
 import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.StreamingChatModel;
@@ -23,19 +22,21 @@ import org.example.aichat.service.ChatService;
 import org.example.aichat.service.RagService;
 import org.example.aichat.service.RoleCardService;
 import org.example.aichat.service.SinkRegistry;
+import org.example.aichat.mcp.McpClientManager;
+import org.example.aichat.skill.SkillRuntimeService;
+import org.example.aichat.skill.SkillService;
 import org.example.aichat.service.memos.MemosClient;
 import org.example.aichat.mapper.ConversationMapper;
 import org.example.aichat.dto.Conversation;
 import org.example.aichat.config.LlmProperties;
 import org.example.aichat.util.PromptLogger;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
-
+import org.example.aichat.util.LatencyTrace;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Slf4j
 @Service
@@ -52,12 +53,12 @@ public class ChatServiceImpl implements ChatService {
     private RagService ragService;
     @Resource
     private ChatMemoryStore chatMemoryStore;
-    @Autowired(required = false)
-    @Qualifier("zhipuMcpClient")
-    private McpClient zhipuMcpClient;
-    @Autowired(required = false)
-    @Qualifier("localMcpClient")
-    private McpClient localMcpClient;
+    @Resource
+    private McpClientManager mcpClientManager;
+    @Resource
+    private SkillService skillService;
+    @Resource
+    private SkillRuntimeService skillRuntimeService;
     @Resource
     private ConversationMapper conversationMapper;
     @Resource
@@ -115,8 +116,9 @@ public class ChatServiceImpl implements ChatService {
             request.getModelBaseUrl(), request.getModelName());
 
         String conversationId = request.getConversationId();
-        Integer roleId = request.getRoleId() != null ? request.getRoleId() : 1;
+        Integer roleId = resolveRoleId(request.getRoleId());
         Integer userId = 0;
+        LatencyTrace trace = request.getLatencyTrace();
         // 0. 保存或更新会话表
         try {
             userId = Integer.parseInt(request.getUserId());
@@ -134,9 +136,20 @@ public class ChatServiceImpl implements ChatService {
             log.error("保存会话失败", e);
         }
 
-        // 1️⃣ 构建包含角色设定的核心 System Prompt（统一走 RoleCardService）
+        // 1️⃣ 构建 System Prompt：基底 → 能力层（技能）→ 角色层 → 记忆
         StringBuilder sysPrompt = new StringBuilder();
-        sysPrompt.append(roleCardService.buildSystemPrompt(roleId)).append("\n\n");
+        sysPrompt.append(roleCardService.buildBasePrompt()).append("\n\n");
+
+        String capabilitySection = skillService.buildCapabilityPromptSection(mcpClientManager);
+        if (capabilitySection != null && !capabilitySection.isEmpty()) {
+            sysPrompt.append(capabilitySection).append("\n\n");
+        }
+
+        String roleLayer = roleCardService.buildRoleLayerPrompt(roleId);
+        if (roleLayer != null && !roleLayer.isEmpty()) {
+            sysPrompt.append(roleLayer).append("\n\n");
+        }
+        sysPrompt.append("下面开始与用户对话。\n");
 
         // 2️⃣ 加载长期记忆（Memos 结构化分段注入）
         if (request.getMessage() != null) {
@@ -179,8 +192,9 @@ public class ChatServiceImpl implements ChatService {
                 }
             }
         }
-        // 旧的 MySQL memory.summary 注入已移除：长期记忆完全由 Memos 接管，
-        // 短期上下文由下方 ChatMemory 滑窗（history 表）提供。
+        if (trace != null) trace.mark("context_memos");
+
+        // 旧的 MySQL memory.summary 注入已移除
 
         // 3️⃣ 创建 ChatMemory —— 自动从 history 表加载历史消息
         ChatMemory chatMemory = MessageWindowChatMemory.builder()
@@ -234,17 +248,16 @@ public class ChatServiceImpl implements ChatService {
         boolean useRag = !Boolean.FALSE.equals(request.getRag());     // null / true → 都开
         boolean useTools = !Boolean.FALSE.equals(request.getTools()); // null / true → 都开
 
-        // 按需联网搜索（直接调用 MCP 工具，将结果注入上下文）
-        if (useSearch && request.getMessage() != null) {
-            String searchResult = executeWebSearch(request.getMessage());
-            if (searchResult != null && !searchResult.isEmpty()) {
-                String searchContext = "【联网搜索结果】\n" + searchResult
-                        + "\n\n请根据以上搜索结果回答用户的问题。如果搜索结果与问题无关，请忽略搜索结果并使用你的知识回答。";
-                allMessages.add(allMessages.size() - 1, UserMessage.from(searchContext));
-                allMessages.add(allMessages.size() - 1, AiMessage.from("好的，我已了解搜索结果，我会结合这些信息来回答。"));
-                log.info("已注入联网搜索结果，长度: {}", searchResult.length());
-            }
+        // 技能预取 + 通用联网预搜索（SearXNG）；webSearch 工具仍可供模型自行调用
+        List<ChatMessage> historyForSkills = new ArrayList<>(chatMemory.messages());
+        injectPreSearch(skillRuntimeService.tryPreInject(
+                request.getMessage(), historyForSkills, useSearch, mcpClientManager), allMessages);
+        if (useSearch && request.getMessage() != null
+                && !skillRuntimeService.shouldSkipGenericPreSearch(request.getMessage(), historyForSkills)) {
+            injectPreSearch(skillRuntimeService.tryGenericWebPreSearch(
+                    request.getMessage(), useSearch, mcpClientManager), allMessages);
         }
+        if (trace != null) trace.mark("context_pre_search");
 
         // 本地知识库检索（RAG，默认开）
         if (useRag && request.getMessage() != null) {
@@ -261,13 +274,13 @@ public class ChatServiceImpl implements ChatService {
             String ragContext = ragService.retrieveContext(roleCode, request.getMessage(), 3);
             if (ragContext != null && !ragContext.isEmpty()) {
                 allMessages.add(allMessages.size() - 1, UserMessage.from(ragContext));
-                allMessages.add(allMessages.size() - 1, AiMessage.from("好的，我已了解这些信息，会结合上下文回答。"));
                 log.info("已注入 RAG 上下文，roleCode={}, 长度: {}", roleCode, ragContext.length());
             }
         }
+        if (trace != null) trace.mark("context_rag");
 
-        // 本地 MCP 工具调用（默认开；Gemma4 原生支持）
-        List<ToolSpecification> localToolSpecs = useTools ? getLocalToolSpecs() : List.of();
+        // MCP 工具调用（默认开；Gemma4 原生支持）：聚合所有已启用 MCP 服务器的工具（含 SearXNG webSearch）
+        List<ToolSpecification> localToolSpecs = useTools ? getMcpToolSpecs() : List.of();
 
         log.debug("发送消息列表大小: {}, conversationId: {}", allMessages.size(), conversationId);
 
@@ -275,11 +288,14 @@ public class ChatServiceImpl implements ChatService {
         final Integer finalUserId = userId;
         final Integer finalRoleId = roleId;
         final StreamingChatModel finalCurrentStreamingChatModel = currentStreamingChatModel;
+        final LatencyTrace finalTrace = trace;
+        if (finalTrace != null) finalTrace.mark("llm_prompt_ready");
 
         return Flux.create(sink -> {
+            AtomicBoolean llmFirstToken = new AtomicBoolean(false);
             doStreamToolLoop(finalMessages, localToolSpecs, chatMemory, conversationId,
                     finalUserId, finalRoleId, sink, new StringBuilder(), 1, finalCurrentStreamingChatModel,
-                    request.getMessage());
+                    request.getMessage(), finalTrace, llmFirstToken);
         });
     }
 
@@ -293,19 +309,25 @@ public class ChatServiceImpl implements ChatService {
                                   StringBuilder fullResponse,
                                   int round,
                                   StreamingChatModel currentStreamingChatModel,
-                                  String originalUserMessage) {
+                                  String originalUserMessage,
+                                  LatencyTrace trace,
+                                  AtomicBoolean llmFirstToken) {
 
         dev.langchain4j.model.chat.request.ChatRequest.Builder reqBuilder =
                 dev.langchain4j.model.chat.request.ChatRequest.builder()
                         .messages(messages);
 
-        // 记录发送给 LLM 的完整 prompt
-        promptLogger.log(conversationId, messages);
+        // 记录发送给 LLM 的完整 prompt（含 toolSpecifications）
+        promptLogger.log(conversationId, messages, toolSpecs);
 
         if (toolSpecs != null && !toolSpecs.isEmpty() && round <= MAX_TOOL_ROUNDS) {
             reqBuilder.parameters(dev.langchain4j.model.chat.request.DefaultChatRequestParameters.builder()
                     .toolSpecifications(toolSpecs)
                     .build());
+        }
+
+        if (trace != null && round == 1) {
+            trace.mark("llm_request");
         }
 
         currentStreamingChatModel.chat(reqBuilder.build(), new StreamingChatResponseHandler() {
@@ -316,24 +338,29 @@ public class ChatServiceImpl implements ChatService {
                     log.info("onPartialResponse: conversationId={} 已被取消，跳过", conversationId);
                     return;
                 }
+                if (trace != null && llmFirstToken.compareAndSet(false, true)) {
+                    trace.mark("llm_first_token");
+                }
                 fullResponse.append(partialResponse);
                 sink.next(partialResponse);
             }
 
             @Override
             public void onCompleteResponse(ChatResponse completeResponse) {
-                // 如果已被打断，直接结束流
-                if (sinkRegistry.isCancelled(conversationId)) {
-                    log.info("onCompleteResponse: conversationId={} 已被取消，直接结束流", conversationId);
-                    sink.complete();
-                    return;
+                boolean cancelled = sinkRegistry.isCancelled(conversationId);
+                if (cancelled) {
+                    log.info("onCompleteResponse: conversationId={} 已被取消", conversationId);
+                }
+                if (trace != null && !cancelled) {
+                    trace.mark("llm_complete");
                 }
                 AiMessage aiMsg = completeResponse.aiMessage();
-                if (aiMsg.hasToolExecutionRequests() && round <= MAX_TOOL_ROUNDS) {
+                if (!cancelled && aiMsg.hasToolExecutionRequests() && round <= MAX_TOOL_ROUNDS) {
                     messages.add(aiMsg);
+                    if (trace != null) trace.mark("tool_round_" + round + "_start");
                     try {
                         for (ToolExecutionRequest toolReq : aiMsg.toolExecutionRequests()) {
-                            String result = localMcpClient.executeTool(toolReq).resultText();
+                            String result = mcpClientManager.executeTool(toolReq);
                             messages.add(ToolExecutionResultMessage.from(toolReq, result));
                             log.info("工具 {} 返回: {}", toolReq.name(), result);
                         }
@@ -343,35 +370,18 @@ public class ChatServiceImpl implements ChatService {
                             messages.add(ToolExecutionResultMessage.from(toolReq, "工具执行失败: " + e.getMessage()));
                         }
                     }
+                    if (trace != null) trace.mark("tool_round_" + round + "_done");
                     doStreamToolLoop(messages, toolSpecs, chatMemory, conversationId,
-                            userId, roleId, sink, fullResponse, round + 1, currentStreamingChatModel, originalUserMessage);
-                } else {
-                    if (fullResponse.length() > 0) {
-                        // 存入 ChatMemory 前规范化情绪标签，防止非规定标签（如<温和>）污染历史
-                        String normalized = normalizeEmotionTags(fullResponse.toString());
-                        chatMemory.add(AiMessage.from(normalized));
-
-                        // 对话结束后：仅将本轮 user 原话推入 Memos（异步）
-                        // 严格遵循 Memos 官方推荐用法：只推 role=user 单条
-                        // 避免 assistant 内容污染 UserMemory 桶（曾观察到 LLM 幻觉被误存为"用户事实"）
-                        if (memosClient.isEnabled() && userId != null && roleId != null
-                                && originalUserMessage != null && !originalUserMessage.isEmpty()) {
-                            String userMsg = originalUserMessage;
-                            String memosUserId = memosProperties.getEffectiveUserId();
-                            new Thread(() -> {
-                                try {
-                                    memosClient.addUserMessage(memosUserId, null, roleId, userMsg);
-                                } catch (Exception e) {
-                                    log.warn("推入 Memos 用户记忆失败 conversationId={}", conversationId, e);
-                                }
-                            }).start();
-                        }
-                    }
-                    // 长期记忆完全由 Memos 接管：无需再触发 MySQL 摘要 / LLM 二次写日记
-                    // 每轮 user+assistant 已在上方 addConversationMemory 推入 Memos，
-                    // Memos 内置 MemReader 会自动提取事实并产出 UserMemory/LongTermMemory。
-                    sink.complete();
+                            userId, roleId, sink, fullResponse, round + 1, currentStreamingChatModel, originalUserMessage,
+                            trace, llmFirstToken);
+                } else if (!cancelled && fullResponse.length() > 0) {
+                    String normalized = normalizeEmotionTags(fullResponse.toString());
+                    chatMemory.add(AiMessage.from(normalized));
+                    pushUserMessageToMemos(conversationId, userId, roleId, originalUserMessage);
+                } else if (cancelled) {
+                    pushUserMessageToMemos(conversationId, userId, roleId, originalUserMessage);
                 }
+                sink.complete();
             }
 
             @Override
@@ -382,39 +392,52 @@ public class ChatServiceImpl implements ChatService {
         });
     }
 
-    /**
-     * 直接调用智谱 MCP 搜索工具，将结果注入上下文。
-     */
-    private String executeWebSearch(String query) {
-        if (zhipuMcpClient == null) {
-            log.warn("智谱 MCP 不可用（启动期初始化失败/网络不可达），跳过联网搜索");
-            return null;
+    private Integer resolveRoleId(Integer roleId) {
+        if (roleId == null) {
+            return 1;
         }
+        org.example.aichat.dto.RoleCard role = roleCardMapper.findById(roleId);
+        if (role != null) {
+            return role.getId();
+        }
+        log.warn("请求 roleId={} 不存在于 role_card，Memos/RAG 回退 roleId=1", roleId);
+        return 1;
+    }
+
+    private void pushUserMessageToMemos(String conversationId, Integer userId, Integer roleId, String userMsg) {
+        if (!memosClient.isEnabled() || userId == null || roleId == null
+                || userMsg == null || userMsg.isBlank()) {
+            return;
+        }
+        String memosUserId = memosProperties.getEffectiveUserId();
         try {
-            ToolExecutionRequest searchReq = ToolExecutionRequest.builder()
-                    .name("webSearchPro")
-                    .arguments("{\"search_query\":\"" + query.replace("\"", "\\\"") + "\"}")
-                    .build();
-            String result = zhipuMcpClient.executeTool(searchReq).resultText();
-            log.info("MCP 搜索完成，结果长度: {}", result.length());
-            return result;
+            boolean ok = memosClient.addUserMessage(memosUserId, conversationId, roleId, userMsg.trim());
+            if (!ok) {
+                log.warn("MemOS 写入用户记忆未确认成功 conversationId={}, roleId={}", conversationId, roleId);
+            }
         } catch (Exception e) {
-            log.error("MCP 搜索失败: {}", e.getMessage());
-            return null;
+            log.warn("推入 Memos 用户记忆失败 conversationId={}, roleId={}", conversationId, roleId, e);
         }
     }
 
+    private void injectPreSearch(java.util.Optional<SkillRuntimeService.PreInjection> pre, List<ChatMessage> allMessages) {
+        pre.ifPresent(p -> {
+            String block = p.blockTitle() + "\n" + p.body() + "\n\n" + p.tailHint();
+            allMessages.add(allMessages.size() - 1, UserMessage.from(block));
+            log.info("已注入技能/搜索上下文 [{}], 长度: {}", p.logTag(), p.body().length());
+        });
+    }
+
     /**
-     * 获取本地 MCP 工具定义列表，供模型看到并自主决定是否调用。
+     * 获取全部已启用 MCP 服务器聚合的工具定义，供模型看到并自主决定是否调用。
      */
-    private List<ToolSpecification> getLocalToolSpecs() {
-        if (localMcpClient == null) return List.of();
+    private List<ToolSpecification> getMcpToolSpecs() {
         try {
-            List<ToolSpecification> specs = localMcpClient.listTools();
-            log.debug("本地 MCP 提供了 {} 个工具", specs.size());
+            List<ToolSpecification> specs = mcpClientManager.listAllTools();
+            log.debug("MCP 注册中心提供了 {} 个工具", specs.size());
             return specs;
         } catch (Exception e) {
-            log.warn("获取本地 MCP 工具失败: {}", e.getMessage());
+            log.warn("获取 MCP 工具失败: {}", e.getMessage());
             return List.of();
         }
     }

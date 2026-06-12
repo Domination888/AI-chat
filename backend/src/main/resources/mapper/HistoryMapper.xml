@@ -5,8 +5,8 @@
 <mapper namespace="org.example.aichat.mapper.HistoryMapper">
 
     <insert id="insert">
-        INSERT INTO history(conversation_id, sender, content, token_count)
-        VALUES(#{conversationId}, #{sender}, #{content}, #{tokenCount})
+        INSERT INTO history(conversation_id, sender, content)
+        VALUES(#{conversationId}, #{sender}, #{content})
     </insert>
 
     <select id="findByConversationId" resultType="org.example.aichat.dto.History">
@@ -23,24 +23,6 @@
             LIMIT #{limit}
         ) t ORDER BY t.id ASC
     </select>
-
-    <select id="sumTokenByConversationId" resultType="int">
-        SELECT IFNULL(SUM(token_count),0)
-        FROM history
-        WHERE conversation_id = #{conversationId}
-    </select>
-
-    <delete id="deleteOldest">
-        DELETE FROM history
-        WHERE id IN (
-        SELECT id FROM (
-        SELECT id FROM history
-        WHERE conversation_id = #{conversationId}
-        ORDER BY id ASC
-        LIMIT #{limit}
-        ) t
-        )
-    </delete>
 
     <delete id="deleteByConversationId">
         DELETE FROM history

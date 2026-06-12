@@ -7,23 +7,30 @@ LOG_DIR="$PROJECT_ROOT/unified-logs"
 PID_DIR="$LOG_DIR/pids"
 PID_FILE="$PID_DIR/pids.txt"
 
-mkdir -p "$LOG_DIR/client" "$PID_DIR"
+mkdir -p "$PID_DIR"
 
 echo "🖥️  Starting Electron client..."
 cd "$PROJECT_ROOT/client"
-npx electron . > "$LOG_DIR/client/app.log" 2>&1 &
+if [ "${CLIENT_LOG:-}" = "1" ]; then
+	mkdir -p "$LOG_DIR/client"
+	npx electron . > "$LOG_DIR/client/app.log" 2>&1 &
+else
+	npx electron . >/dev/null 2>&1 &
+fi
 CLIENT_PID=$!
 cd "$PROJECT_ROOT"
 
 # 保存PID（单一 pids.txt）
 if [ -f "$PID_FILE" ]; then
-	grep -v "^electron " "$PID_FILE" > "$PID_FILE.tmp" || true
+	grep -v "^client " "$PID_FILE" > "$PID_FILE.tmp" || true
 	mv "$PID_FILE.tmp" "$PID_FILE"
 fi
-echo "electron $CLIENT_PID" >> "$PID_FILE"
+echo "client $CLIENT_PID" >> "$PID_FILE"
 
 echo "✅ Electron client is starting..."
-echo "📊 Logs: $LOG_DIR/client/app.log"
+if [ "${CLIENT_LOG:-}" = "1" ]; then
+	echo "📊 Logs: $LOG_DIR/client/app.log"
+fi
 
 # 等待几秒钟确保启动
 sleep 3

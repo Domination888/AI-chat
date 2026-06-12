@@ -1,6 +1,8 @@
 package org.example.aichat.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
+import org.example.aichat.util.LatencyTrace;
 
 import java.util.List;
 
@@ -58,4 +60,11 @@ public class ChatRequest {
     private String ttsVoiceId;          // TTS音色ID
     private Double ttsSpeedFactor;      // TTS语速
     private Double ttsPitchFactor;      // TTS音调
+
+    /** 前端发送时刻（epoch ms），用于全链路 E2E 延迟 */
+    private Long clientSentAt;
+
+    /** 服务端延迟追踪（不序列化） */
+    @JsonIgnore
+    private transient LatencyTrace latencyTrace;
 }

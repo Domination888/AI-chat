@@ -71,6 +71,9 @@
           <button @click="openSettings" class="flex-1 text-xs border border-gray-300 dark:border-gray-600 rounded-md py-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition">
             ⚙️ 设置
           </button>
+          <button @click="showExtensions = true" class="flex-1 text-xs border border-gray-300 dark:border-gray-600 rounded-md py-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition" title="管理 MCP 服务器与技能">
+            🧩 扩展
+          </button>
           <button @click="logout" class="flex-1 text-xs text-gray-500 dark:text-gray-400 hover:text-red-500 border border-gray-300 dark:border-gray-600 rounded-md py-1.5 transition">
             退出
           </button>
@@ -153,8 +156,8 @@
             <!-- Toggles：仅展示"联网"。RAG 和本地工具默认常开（详见 PLAN-001） -->
             <div class="flex items-center gap-5">
 
-              <!-- Web Search：联网搜索（智谱 Web Search MCP），默认关闭，由用户手动开启 -->
-              <label class="flex items-center cursor-pointer select-none" title="联网搜索（智谱 Web Search MCP）">
+              <!-- Web Search：联网搜索（本地 SearXNG MCP），默认关闭，由用户手动开启 -->
+              <label class="flex items-center cursor-pointer select-none" title="联网搜索（本地 SearXNG）">
                 <span class="mr-2 text-xs font-medium transition-colors"
                       :class="useSearch ? 'text-emerald-600' : 'text-gray-500 dark:text-gray-400'">联网</span>
                 <button type="button"
@@ -226,8 +229,14 @@
   </div>
   
   <!-- 设置模态框 -->
+  <McpSkillManager
+    :show="showExtensions"
+    @close="showExtensions = false"
+  />
+
   <SettingsModal 
-    :show="showSettings" 
+    :show="showSettings"
+    :initial-settings="settings"
     @close="showSettings = false"
     @save="handleSettingsSave"
     ref="settingsModal"
@@ -253,15 +262,17 @@
 import { ref, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import SettingsModal from './components/SettingsModal.vue'
+import McpSkillManager from './components/McpSkillManager.vue'
 import RoleCardSelector from './components/RoleCardSelector.vue'
 import Live2DCanvas from './components/Live2DCanvas.vue'
 import { live2dController } from './live2d/live2d-controller.js'
+import { DEFAULT_SETTINGS, fetchRuntimeConfig, runtimeConfigToSettings } from './utils/runtimeConfig.js'
 
 const inputRaw = ref('')
 const messages = ref([])
 const loading = ref(false)
 
-// 联网搜索：默认关，由用户手动 toggle；其它能力（RAG、本地 MCP 工具）默认常开，前端不暴露开关
+// 联网搜索：默认关，由用户手动 toggle（开启时强制走一次 SearXNG 搜索并注入；关闭时模型仍可自行调用 webSearch 工具）
 const useSearch = ref(false)
 
 const toggleSearch = () => {
@@ -304,6 +315,13 @@ const loginError = ref('')
 const roles = ref([])
 const selectedRole = ref(null)
 
+const findDefaultRole = (roleList) => {
+  if (!roleList?.length) return null
+  return roleList.find(r => r.roleCode === 'shu')
+    || roleList.find(r => r.name === '黍')
+    || roleList[0]
+}
+
 const conversations = ref([])
 const currentConversationId = ref('')
 
@@ -312,22 +330,23 @@ const isRecording = ref(false)
 let mediaRecorder = null
 let audioChunks = []
 
+const PROACTIVE_IDLE_STEP = 1800
+const PROACTIVE_IDLE_DEFAULT = 3600
+const PROACTIVE_IDLE_MIN = 1800
+const PROACTIVE_IDLE_MAX = 43200
+
+const normalizeProactiveIdleSeconds = (value) => {
+  const n = parseInt(value)
+  if (!n || n < PROACTIVE_IDLE_MIN) return PROACTIVE_IDLE_DEFAULT
+  const snapped = Math.round(n / PROACTIVE_IDLE_STEP) * PROACTIVE_IDLE_STEP
+  return Math.min(PROACTIVE_IDLE_MAX, Math.max(PROACTIVE_IDLE_MIN, snapped))
+}
+
 // 设置相关
 const showSettings = ref(false)
+const showExtensions = ref(false)
 const showRoleSelector = ref(false)
-const settings = ref({
-  modelBaseUrl: null,
-  modelName: null,
-  asrService: 'sensevoice',
-  asrLanguage: 'zh',
-  ttsSpeed: 1.0,
-  ttsPitch: 1.0,
-  autoPlayTts: true,
-  darkMode: false,
-  proactiveChatEnabled: true,
-  proactiveIdleSeconds: 30,
-  proactivePrompt: '[System: 用户长时间未说话，请根据上下文主动搭话，自然地延续对话]'
-})
+const settings = ref({ ...DEFAULT_SETTINGS })
 
 const doLogin = async () => {
   if (!loginForm.value.username || !loginForm.value.password) {
@@ -372,7 +391,7 @@ const loadRoles = async () => {
     const data = await res.json()
     roles.value = data || []
     if (roles.value.length > 0 && !selectedRole.value) {
-      selectedRole.value = roles.value[0]
+      selectedRole.value = findDefaultRole(roles.value)
     }
   } catch (e) {
     console.error('加载角色失败', e)
@@ -745,6 +764,9 @@ const feedStreamPcm = (idx, bytes, buf) => {
   if (!player.lipSyncStarted) {
     player.lipSyncStarted = true
     live2dController.startLipSync(ctx, src)
+    if (currentLatencySession && !currentLatencySession.steps.client_first_tts_play) {
+      markLatency(currentLatencySession, 'client_first_tts_play')
+    }
   }
 
   src.onended = () => {
@@ -837,6 +859,12 @@ const onTtsSentenceFinished = (idx) => {
     ttsPlayingIdx = null
     pumpTtsSentenceQueue()
   }
+  const session = currentLatencySession
+  if (session) {
+    session.playingTts.delete(idx)
+    markLatency(session, 'client_last_tts_play')
+    tryFinishLatencySession(session)
+  }
 }
 
 // 暂存因串行队列未到而延迟喂入的 PCM chunks：idx -> [{bytes, buf}]
@@ -852,6 +880,10 @@ const handleTtsEvent = (payload) => {
       streamPlay: !!payload.streamPlay,
       chunks: []
     })
+    if (currentLatencySession) {
+      currentLatencySession.ttsSentenceCount++
+      currentLatencySession.playingTts.add(idx)
+    }
     // 流式句子：加入串行队列
     if (payload.streamPlay) {
       enqueueTtsSentence(idx)
@@ -862,6 +894,9 @@ const handleTtsEvent = (payload) => {
   if (payload.audioBase64) {
     try {
       const bytes = decodeTtsChunkBytes(payload.audioBase64)
+      if (currentLatencySession && !currentLatencySession.steps.client_first_tts_chunk) {
+        markLatency(currentLatencySession, 'client_first_tts_chunk')
+      }
       if (buf.streamPlay && (buf.format === 'pcm_s16le' || buf.format === 'pcm_f32le')) {
         // 串行控制：只有当前正在播放的句子才立即喂入 feedStreamPcm
         if (ttsPlayingIdx === idx) {
@@ -1061,6 +1096,63 @@ const abortCurrentChat = async () => {
 }
 
 // ============================================================
+// 全链路延迟追踪（打字 → SSE → TTS 播放完）
+// ============================================================
+let currentLatencySession = null
+
+const markLatency = (session, step) => {
+  if (!session || session.steps[step]) return
+  session.steps[step] = Date.now()
+}
+
+const reportLatency = async (session) => {
+  if (!session?.traceId || session.reported) return
+  session.reported = true
+  try {
+    await fetch('/api/chat/latency', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        traceId: session.traceId,
+        conversationId: currentConversationId.value,
+        steps: session.steps
+      })
+    })
+  } catch (e) {
+    console.warn('latency report failed', e)
+  }
+}
+
+const tryFinishLatencySession = (session) => {
+  if (!session || session.reported || !session.sseDone) return
+  if (session.wantTts && session.ttsSentenceCount > 0 && session.playingTts.size > 0) return
+  markLatency(session, 'client_sse_done')
+  if (!session.wantTts || session.ttsSentenceCount === 0) {
+    markLatency(session, 'client_last_tts_play')
+  }
+  reportLatency(session)
+}
+
+const beginLatencySession = (requestBody) => {
+  const clientSentAt = Date.now()
+  requestBody.clientSentAt = clientSentAt
+  const session = {
+    traceId: null,
+    wantTts: !!requestBody.ttsVoiceId,
+    sseDone: false,
+    reported: false,
+    ttsSentenceCount: 0,
+    playingTts: new Set(),
+    steps: {
+      client_sent: clientSentAt,
+      client_fetch_start: Date.now()
+    }
+  }
+  currentLatencySession = session
+  return session
+}
+
+// ============================================================
 // 流式对话（统一入口）：语音/文本都走 POST /api/chat
 // SSE 事件：asr / text / tts / done / error
 // ============================================================
@@ -1072,6 +1164,7 @@ const abortCurrentChat = async () => {
  * @param aiMsgIndex AI 消息在 messages 数组中的 index
  */
 const doChatSSE = async (requestBody, userMsgIndex, aiMsgIndex) => {
+  const latencySession = beginLatencySession(requestBody)
   // 创建 AbortController 支持请求级打断
   const controller = new AbortController()
   currentAbortController = controller
@@ -1082,11 +1175,14 @@ const doChatSSE = async (requestBody, userMsgIndex, aiMsgIndex) => {
     body: JSON.stringify(requestBody),
     signal: controller.signal
   })
+  markLatency(latencySession, 'client_response_headers')
   if (!response.ok || !response.body) throw new Error('HTTP error')
 
   const reader = response.body.getReader()
   const decoder = new TextDecoder('utf-8')
   let buffer = ''
+  let firstSse = true
+  let firstText = true
   try {
   while (true) {
     const { done, value } = await reader.read()
@@ -1108,10 +1204,15 @@ const doChatSSE = async (requestBody, userMsgIndex, aiMsgIndex) => {
         }
       }
       if (!dataLines.length) continue
+      if (firstSse) {
+        markLatency(latencySession, 'client_first_sse')
+        firstSse = false
+      }
       let payload = {}
       try { payload = JSON.parse(dataLines.join('\n')) } catch { payload = {} }
 
       if (evName === 'asr' && userMsgIndex !== null) {
+        markLatency(latencySession, 'client_asr_text')
         // 语音输入：ASR 回填用户消息
         messages.value[userMsgIndex].content = payload.text || ''
         messages.value[userMsgIndex].isAudio = false
@@ -1119,6 +1220,10 @@ const doChatSSE = async (requestBody, userMsgIndex, aiMsgIndex) => {
         // 情绪标签事件：驱动 Live2D 表情/动作
         live2dController.triggerEmotion(payload.emotion)
       } else if (evName === 'text') {
+        if (firstText && (payload.delta || '')) {
+          markLatency(latencySession, 'client_first_text')
+          firstText = false
+        }
         messages.value[aiMsgIndex].content += (payload.delta || '')
         scrollToBottom()
       } else if (evName === 'tts') {
@@ -1126,7 +1231,9 @@ const doChatSSE = async (requestBody, userMsgIndex, aiMsgIndex) => {
       } else if (evName === 'error') {
         messages.value[aiMsgIndex].content += `\n[错误] ${payload.message || ''}`
       } else if (evName === 'done') {
-        // 流结束：延迟恢复默认表情
+        if (payload.traceId) latencySession.traceId = payload.traceId
+        latencySession.sseDone = true
+        tryFinishLatencySession(latencySession)
         live2dController.onConversationEnd()
       }
     }
@@ -1218,13 +1325,14 @@ const openSettings = () => {
   showSettings.value = true
 }
 
-/** 从 localStorage 恢复设置（页面重启后自动生效） */
+/** 从 localStorage 恢复客户端缓存（后端不可用时兜底） */
 const restoreSettings = () => {
   const saved = localStorage.getItem('appSettings')
   if (saved) {
     try {
       const parsed = JSON.parse(saved)
-      settings.value = { ...settings.value, ...parsed }
+      settings.value = { ...DEFAULT_SETTINGS, ...parsed }
+      settings.value.proactiveIdleSeconds = normalizeProactiveIdleSeconds(settings.value.proactiveIdleSeconds)
     } catch (e) {
       console.error('恢复设置失败', e)
     }
@@ -1241,28 +1349,10 @@ const applyDarkMode = (isDark) => {
 }
 
 const handleSettingsSave = async (newSettings) => {
-  settings.value = { ...newSettings }
-  // 保存到localStorage
+  settings.value = { ...DEFAULT_SETTINGS, ...newSettings }
+  settings.value.proactiveIdleSeconds = normalizeProactiveIdleSeconds(settings.value.proactiveIdleSeconds)
   localStorage.setItem('appSettings', JSON.stringify(settings.value))
-  // 实时应用深色模式
   applyDarkMode(settings.value.darkMode)
-  // 同步 LLM 配置到后端（热加载）
-  if (settings.value.modelBaseUrl || settings.value.modelName) {
-    try {
-      await fetch('/api/llm-config', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          baseUrl: settings.value.modelBaseUrl || undefined,
-          modelName: settings.value.modelName || undefined
-        })
-      })
-    } catch (e) {
-      console.warn('同步 LLM 配置到后端失败', e)
-    }
-  }
-  ElMessage.success('设置已保存')
-  // 如果 proactive 配置变更，重新注册
   if (currentConversationId.value && user.value) {
     if (settings.value.proactiveChatEnabled) {
       registerProactiveChat()
@@ -1272,26 +1362,17 @@ const handleSettingsSave = async (newSettings) => {
   }
 }
 
-// 加载设置（从后端 + localStorage）
+// 加载设置（优先后端 runtime-config，fallback localStorage）
 const loadSettings = async () => {
-  const savedSettings = localStorage.getItem('appSettings')
-  if (savedSettings) {
-    try {
-      settings.value = { ...settings.value, ...JSON.parse(savedSettings) }
-    } catch (e) {
-      console.error('加载设置失败', e)
-    }
-  }
-  // 从后端获取当前生效的 LLM 配置（覆盖 localStorage 的值）
+  restoreSettings()
   try {
-    const res = await fetch('/api/llm-config')
-    if (res.ok) {
-      const config = await res.json()
-      settings.value.modelBaseUrl = config.baseUrl || null
-      settings.value.modelName = config.modelName || null
-    }
+    const config = await fetchRuntimeConfig()
+    settings.value = { ...DEFAULT_SETTINGS, ...runtimeConfigToSettings(config) }
+    settings.value.proactiveIdleSeconds = normalizeProactiveIdleSeconds(settings.value.proactiveIdleSeconds)
+    localStorage.setItem('appSettings', JSON.stringify(settings.value))
+    applyDarkMode(settings.value.darkMode)
   } catch (e) {
-    // 后端不可用，保持 localStorage 值
+    console.warn('从后端加载配置失败，使用本地缓存', e)
   }
 }
 
@@ -1301,7 +1382,7 @@ const initDataAfterLogin = async () => {
   await loadRoles()
   // loadConversations 依赖 selectedRole，先确保角色已选中
   if (!selectedRole.value && roles.value.length > 0) {
-    selectedRole.value = roles.value[0]
+    selectedRole.value = findDefaultRole(roles.value)
   }
   await loadConversations()
   if (conversations.value.length > 0) {

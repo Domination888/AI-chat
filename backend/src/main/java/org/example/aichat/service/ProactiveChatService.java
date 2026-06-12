@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.example.aichat.dto.ChatRequest;
 import org.example.aichat.dto.RoleCard;
+import org.example.aichat.util.LatencyLogger;
+import org.example.aichat.util.LatencyTrace;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -42,6 +44,7 @@ public class ProactiveChatService {
     private final ChatService chatService;
     private final RoleCardService roleCardService;
     private final VoiceService voiceService;
+    private final LatencyLogger latencyLogger;
     private final ObjectMapper om = new ObjectMapper();
 
     /** 定时调度器 */
@@ -79,11 +82,13 @@ public class ProactiveChatService {
             "[System: 用户仍然安静，换一种语气或聊一件小事来打破沉默，不要再说之前的话了]"
     );
 
-    public ProactiveChatService(SinkRegistry sinkRegistry, ChatService chatService, RoleCardService roleCardService, VoiceService voiceService) {
+    public ProactiveChatService(SinkRegistry sinkRegistry, ChatService chatService, RoleCardService roleCardService,
+                                VoiceService voiceService, LatencyLogger latencyLogger) {
         this.sinkRegistry = sinkRegistry;
         this.chatService = chatService;
         this.roleCardService = roleCardService;
         this.voiceService = voiceService;
+        this.latencyLogger = latencyLogger;
     }
 
     @PreDestroy
@@ -96,7 +101,7 @@ public class ProactiveChatService {
      */
     public void register(String conversationId, Integer userId, Integer roleId,
                          Integer idleSeconds, String proactivePrompt) {
-        int idle = (idleSeconds != null && idleSeconds > 0) ? idleSeconds : 30;
+        int idle = (idleSeconds != null && idleSeconds > 0) ? idleSeconds : 3600;
         String prompt = (proactivePrompt != null && !proactivePrompt.isEmpty())
                 ? proactivePrompt : "[System: 用户长时间未说话，请根据上下文主动搭话，自然地延续对话]";
 
@@ -264,6 +269,11 @@ public class ProactiveChatService {
             request.setTtsPitchFactor(1.0);
         }
 
+        long proactiveStart = System.currentTimeMillis();
+        LatencyTrace trace = latencyLogger.startTrace(conversationId, "proactive", proactiveStart);
+        trace.meta("source", "proactive");
+        request.setLatencyTrace(trace);
+
         // 推送 proactive 标记事件
         proactiveSink.tryEmitNext(sse("proactive", jsonVal("message", "AI 主动搭话")));
 
@@ -280,10 +290,17 @@ public class ProactiveChatService {
         Double speedFactor = request.getTtsSpeedFactor();
         Double pitchFactor = request.getTtsPitchFactor();
         boolean wantTts = voiceId != null && !voiceId.isEmpty();
+        LatencyTrace trace = request.getLatencyTrace();
+        if (trace != null) {
+            trace.meta("wantTts", wantTts);
+        }
 
         // 语音场景优先首包速度：缩短最小句长
         SentenceSplitter splitter = wantTts ? new SentenceSplitter(6, 48) : null;
         AtomicInteger ttsIdx = new AtomicInteger(0);
+        AtomicInteger ttsSentenceCount = new AtomicInteger(0);
+        AtomicBoolean sseFirstText = new AtomicBoolean(false);
+        AtomicBoolean sseFirstTts = new AtomicBoolean(false);
 
         Flux<String> llmFlux = chatService.chatStream(request);
 
@@ -301,13 +318,15 @@ public class ProactiveChatService {
                     // 情绪标签提取与剥离（跨 token 缓冲）：后端剥离，前端收到的 text delta 已不含标签
                     String cleanToken = emotionBuf.process(token);
                     if (!cleanToken.isEmpty()) {
-                        // 文本流：推给前端（纯文本，不含情绪标签）
+                        if (trace != null && sseFirstText.compareAndSet(false, true)) {
+                            trace.mark("sse_first_text");
+                        }
                         proactiveSink.tryEmitNext(sse("text", jsonVal("delta", cleanToken)));
-                        // 如果需要 TTS，攒句子（用纯文本）
                         if (wantTts && splitter != null) {
                             List<String> sentences = splitter.append(cleanToken);
                             for (String s : sentences) {
-                                emitTts(proactiveSink, s, voiceId, speedFactor, pitchFactor, ttsIdx.getAndIncrement());
+                                emitTts(proactiveSink, s, voiceId, speedFactor, pitchFactor,
+                                        ttsIdx.getAndIncrement(), trace, sseFirstTts, ttsSentenceCount);
                             }
                         }
                     }
@@ -316,21 +335,31 @@ public class ProactiveChatService {
                     // 刷出情绪标签缓冲区残余内容
                     String emotionFlush = emotionBuf.flush();
                     if (!emotionFlush.isEmpty()) {
+                        if (trace != null && sseFirstText.compareAndSet(false, true)) {
+                            trace.mark("sse_first_text");
+                        }
                         proactiveSink.tryEmitNext(sse("text", jsonVal("delta", emotionFlush)));
                         if (wantTts && splitter != null) {
                             List<String> sentences = splitter.append(emotionFlush);
                             for (String s : sentences) {
-                                emitTts(proactiveSink, s, voiceId, speedFactor, pitchFactor, ttsIdx.getAndIncrement());
+                                emitTts(proactiveSink, s, voiceId, speedFactor, pitchFactor,
+                                        ttsIdx.getAndIncrement(), trace, sseFirstTts, ttsSentenceCount);
                             }
                         }
                     }
                     if (wantTts && splitter != null) {
                         String tail = splitter.flushRemainder();
                         if (tail != null && !tail.isBlank()) {
-                            emitTts(proactiveSink, tail, voiceId, speedFactor, pitchFactor, ttsIdx.getAndIncrement());
+                            emitTts(proactiveSink, tail, voiceId, speedFactor, pitchFactor,
+                                    ttsIdx.getAndIncrement(), trace, sseFirstTts, ttsSentenceCount);
                         }
                     }
-                    
+
+                    if (trace != null) {
+                        trace.meta("ttsSentences", ttsSentenceCount.get());
+                        latencyLogger.stageServerComplete(trace);
+                    }
+
                     // 记录本次回复用于下次去重
                     String response = getFullResponseText(emotionBuf);
                     if (!response.isEmpty()) {
@@ -338,10 +367,13 @@ public class ProactiveChatService {
                     }
                     
                     if (isCancelled(conversationId)) {
-                        // 被打断，推送打断事件
                         proactiveSink.tryEmitNext(sse("interrupted", "{}"));
                     } else {
-                        proactiveSink.tryEmitNext(sse("done", "{}"));
+                        Map<String, Object> donePayload = new HashMap<>();
+                        if (trace != null) {
+                            donePayload.put("traceId", trace.getTraceId());
+                        }
+                        proactiveSink.tryEmitNext(sse("done", jsonObj(donePayload)));
                     }
                     lastInteractionTimes.put(conversationId, System.currentTimeMillis());
                     
@@ -350,10 +382,13 @@ public class ProactiveChatService {
                     if (generating != null) generating.set(false);
                 })
                 .doOnError(err -> {
-                    // 重置生成状态
                     AtomicBoolean generating = proactiveGenerating.get(conversationId);
                     if (generating != null) generating.set(false);
-                    
+
+                    if (trace != null) {
+                        trace.meta("error", String.valueOf(err.getMessage()));
+                        latencyLogger.stageServerComplete(trace);
+                    }
                     log.error("ProactiveChatService: 主动搭话 LLM 失败, conversationId={}", conversationId, err);
                     proactiveSink.tryEmitNext(sse("error", jsonVal("message", "主动搭话失败")));
                 })
@@ -432,16 +467,26 @@ public class ProactiveChatService {
      * 前端按 idx 归类、按 seq 顺序拼装 Blob 播放。
      */
     private void emitTts(Sinks.Many<ServerSentEvent<String>> sink,
-                         String sentence, String voiceId, Double speedFactor, Double pitchFactor, int idx) {
+                         String sentence, String voiceId, Double speedFactor, Double pitchFactor, int idx,
+                         LatencyTrace trace, AtomicBoolean sseFirstTts, AtomicInteger ttsSentenceCount) {
         final long t0 = System.currentTimeMillis();
         final AtomicInteger seq = new AtomicInteger(0);
         final long[] firstChunkCost = {-1};
+        if (trace != null) {
+            trace.mark("tts_" + idx + "_start");
+        }
         try {
             log.info("TTS sentence#{} start: {}", idx, abbr(sentence));
             long n = voiceService.ttsStreamWithFullParams(sentence, voiceId, speedFactor, pitchFactor, chunk -> {
                 int s = seq.getAndIncrement();
                 if (s == 0) {
                     firstChunkCost[0] = System.currentTimeMillis() - t0;
+                    if (trace != null) {
+                        trace.mark("tts_" + idx + "_first_chunk");
+                        if (sseFirstTts.compareAndSet(false, true)) {
+                            trace.mark("sse_first_tts_chunk");
+                        }
+                    }
                     log.info("TTS sentence#{} first-chunk: bytes={}, ttfb={}ms", idx, chunk.length, firstChunkCost[0]);
                 }
                 String b64 = Base64.getEncoder().encodeToString(chunk);
@@ -480,6 +525,11 @@ public class ProactiveChatService {
             tail.put("costMs", cost);
             tail.put("ttfbMs", firstChunkCost[0]);
             sink.tryEmitNext(sse("tts", jsonObj(tail)));
+            if (trace != null) {
+                trace.mark("tts_" + idx + "_done");
+                trace.mark("tts_last_done");
+            }
+            ttsSentenceCount.incrementAndGet();
             log.info("TTS sentence#{} done: bytes={}, chunks={}, ttfb={}ms, total={}ms",
                     idx, n, seq.get(), firstChunkCost[0], cost);
         } catch (Exception e) {

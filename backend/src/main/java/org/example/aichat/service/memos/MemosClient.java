@@ -6,6 +6,8 @@ import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.aichat.config.MemosProperties;
+import org.example.aichat.dto.RoleCard;
+import org.example.aichat.mapper.RoleCardMapper;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -23,6 +25,9 @@ import java.util.*;
 @RequiredArgsConstructor
 public class MemosClient {
 
+    /** Memos 官方 session 软信号 + 本侧硬过滤用的角色桶前缀（写入时打在 session_id 上） */
+    public static final String ROLE_SESSION_PREFIX = "role_";
+    private static final String LEGACY_SESSION_ID = "default_session";
     private static final int MAX_ITEM_CHARS = 400;
     private static final List<String> LIST_FIELDS = List.of(
             // Memos /product/search 返回的分组字段
@@ -80,13 +85,20 @@ public class MemosClient {
     }
 
     private final MemosProperties props;
+    private final RoleCardMapper roleCardMapper;
     private final ObjectMapper objectMapper;
 
     private RestTemplate restTemplate;
 
     @PostConstruct
     public void init() {
+        refreshClient();
+    }
+
+    /** 运行时配置变更后重建 MemOS HTTP 客户端 */
+    public void refreshClient() {
         if (!props.isEnabled()) {
+            restTemplate = null;
             log.info("MemOS client disabled");
             return;
         }
@@ -119,7 +131,7 @@ public class MemosClient {
      *
      * @param userId    用户 ID
      * @param sessionId 会话 ID（可选）
-     * @param roleId    角色 ID（可选，写入 info 元数据）
+     * @param roleId    角色 ID（可选，映射为 session_id=role_{id} 与角色 cube）
      * @param memoryText 记忆文本内容
      * @return 是否添加成功
      */
@@ -130,10 +142,11 @@ public class MemosClient {
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("user_id", userId);
-        if (StringUtils.hasText(sessionId)) {
-            body.put("session_id", sessionId);
+        String effectiveSessionId = resolveSessionId(roleId, sessionId);
+        if (StringUtils.hasText(effectiveSessionId)) {
+            body.put("session_id", effectiveSessionId);
         }
-        body.put("async_mode", props.getAsyncMode());
+        body.put("async_mode", "sync");
 
         // 结构化 messages：对齐 API 规范，传 [{"role":"user","content":"..."}]
         List<Map<String, String>> messages = new ArrayList<>();
@@ -143,32 +156,25 @@ public class MemosClient {
         messages.add(msg);
         body.put("messages", messages);
 
-        // writable_cube_ids —— 多 cube 写入
-        List<String> writableCubeIds = props.parseWritableCubeIds();
+        List<String> writableCubeIds = resolveWritableCubeIds(roleId);
         if (!writableCubeIds.isEmpty()) {
             body.put("writable_cube_ids", writableCubeIds);
         }
 
-        // custom_tags
-        body.put("custom_tags", List.of("long_term_memory"));
+        body.put("custom_tags", List.of("long_term_memory", roleTag(roleId)));
 
-        // info 元数据：所有 key 可作为 search filter
         Map<String, Object> info = new LinkedHashMap<>();
+        info.put("source", "ai-chat");
+        info.put("memory_type", "long_term_diary");
         if (roleId != null) {
             info.put("role_id", roleId);
         }
         if (StringUtils.hasText(sessionId)) {
             info.put("conversation_id", sessionId);
         }
-        info.put("source", "ai-chat");
-        info.put("memory_type", "long_term_diary");
         body.put("info", info);
 
-        String resp = post("/product/add", body);
-        if (resp != null) {
-            log.debug("MemOS add memory success: userId={}, roleId={}", userId, roleId);
-        }
-        return resp != null;
+        return submitAdd(body, userId, roleId, effectiveSessionId, "long_term");
     }
 
     /**
@@ -182,8 +188,8 @@ public class MemosClient {
      * - 官方文档示例：messages = [{"role": "user", "content": "我喜欢草莓"}]
      *
      * @param userId    Memos user_id（UUID）
-     * @param sessionId 会话 ID（可选，用于 soft-filtering）
-     * @param roleId    业务侧角色 ID（可选，写入 info.role_id）
+     * @param sessionId 会话 ID（可选；有 roleId 时以 role_{id} 为准）
+     * @param roleId    业务侧 role_card.id
      * @param userMsg   用户原话
      * @return 是否添加成功
      */
@@ -194,10 +200,11 @@ public class MemosClient {
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("user_id", userId);
-        if (StringUtils.hasText(sessionId)) {
-            body.put("session_id", sessionId);
+        String effectiveSessionId = resolveSessionId(roleId, sessionId);
+        if (StringUtils.hasText(effectiveSessionId)) {
+            body.put("session_id", effectiveSessionId);
         }
-        body.put("async_mode", props.getAsyncMode());
+        body.put("async_mode", "sync");
 
         // 仅推一条 user 消息 —— 杜绝 assistant 内容污染 UserMemory 桶
         Map<String, String> userMessage = new LinkedHashMap<>();
@@ -205,28 +212,25 @@ public class MemosClient {
         userMessage.put("content", userMsg);
         body.put("messages", List.of(userMessage));
 
-        List<String> writableCubeIds = props.parseWritableCubeIds();
+        List<String> writableCubeIds = resolveWritableCubeIds(roleId);
         if (!writableCubeIds.isEmpty()) {
             body.put("writable_cube_ids", writableCubeIds);
         }
 
+        body.put("custom_tags", List.of(roleTag(roleId)));
+
         Map<String, Object> info = new LinkedHashMap<>();
+        info.put("source", "ai-chat");
+        info.put("memory_type", "user_fact");
         if (roleId != null) {
             info.put("role_id", roleId);
         }
         if (StringUtils.hasText(sessionId)) {
             info.put("conversation_id", sessionId);
         }
-        info.put("source", "ai-chat");
-        info.put("memory_type", "user_fact");
         body.put("info", info);
 
-        String resp = post("/product/add", body);
-        if (resp != null) {
-            log.debug("MemOS add user message success: userId={}, roleId={}, len={}",
-                    userId, roleId, userMsg.length());
-        }
-        return resp != null;
+        return submitAdd(body, userId, roleId, effectiveSessionId, "user_message");
     }
 
     // ======================== Search Memory ========================
@@ -264,47 +268,38 @@ public class MemosClient {
             return SearchResult.empty();
         }
         int limit = (topK != null && topK > 0) ? topK : props.getSearchTopK();
+        String roleSessionId = roleId != null ? roleSessionId(roleId) : null;
+        int fetchLimit = roleSessionId != null ? Math.max(limit * 3, 30) : limit;
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("user_id", userId);
         body.put("query", query);
-        body.put("top_k", limit);
+        body.put("top_k", fetchLimit);
         body.put("mode", props.getSearchMode());
         body.put("relativity", props.getRelativity());
         body.put("include_preference", props.isIncludePreference());
         body.put("pref_top_k", props.getPrefTopK());
 
-        if (StringUtils.hasText(sessionId)) {
-            body.put("session_id", sessionId);
+        // 官方文档：session_id 仅作相关性加权，非硬过滤；硬过滤在 parse 阶段按 metadata.session_id 完成
+        String searchSessionId = roleSessionId != null ? roleSessionId : sessionId;
+        if (StringUtils.hasText(searchSessionId)) {
+            body.put("session_id", searchSessionId);
         }
 
-        List<String> readableCubeIds = props.parseReadableCubeIds();
+        List<String> readableCubeIds = resolveReadableCubeIds(roleId);
         if (!readableCubeIds.isEmpty()) {
             body.put("readable_cube_ids", readableCubeIds);
         }
 
-        if (props.isRoleFilterEnabled() && roleId != null) {
-            Map<String, Object> filter = new LinkedHashMap<>();
-            List<Map<String, Object>> clauses = new ArrayList<>();
-            clauses.add(Map.of("role_id", roleId));
-            clauses.add(Map.of("info.role_id", roleId));
-            filter.put("and", clauses);
-            body.put("filter", filter);
-        }
-
         String resp = post("/product/search", body);
-        if (resp == null && body.containsKey("filter")) {
-            body.remove("filter");
-            resp = post("/product/search", body);
-        }
         if (resp == null) {
             log.warn("MemOS search returned null for userId={}, query={}", userId, query);
             return SearchResult.empty();
         }
-        SearchResult parsed = parseStructuredResponse(resp, limit);
-        log.info("MemOS search: query='{}', mode={}, topK={}, user={}, longTerm={}, pref={}, others={}",
+        SearchResult parsed = parseStructuredResponse(resp, limit, roleId);
+        log.info("MemOS search: query='{}', mode={}, topK={}, roleSession={}, cubes={}, user={}, longTerm={}, pref={}, others={}",
                 query.length() > 30 ? query.substring(0, 30) + "..." : query,
-                props.getSearchMode(), limit,
+                props.getSearchMode(), limit, roleSessionId, readableCubeIds,
                 parsed.userMemories().size(), parsed.longTermMemories().size(),
                 parsed.preferenceMemories().size(), parsed.others().size());
         return parsed;
@@ -412,6 +407,108 @@ public class MemosClient {
         }
     }
 
+    // ======================== Role isolation ========================
+
+    /**
+     * 角色记忆桶 session_id。Memos 会持久化该字段；搜索 API 仅软加权，本侧再硬过滤。
+     */
+    public static String roleSessionId(Integer roleId) {
+        return roleId == null ? null : ROLE_SESSION_PREFIX + roleId;
+    }
+
+    private static String roleTag(Integer roleId) {
+        return roleId == null ? "role_unknown" : ROLE_SESSION_PREFIX + roleId;
+    }
+
+    private String resolveSessionId(Integer roleId, String conversationSessionId) {
+        if (roleId != null) {
+            return roleSessionId(roleId);
+        }
+        return conversationSessionId;
+    }
+
+    private List<String> resolveWritableCubeIds(Integer roleId) {
+        String roleCube = lookupRoleCubeId(roleId);
+        if (StringUtils.hasText(roleCube)) {
+            return List.of(roleCube.trim());
+        }
+        return props.parseWritableCubeIds();
+    }
+
+    private List<String> resolveReadableCubeIds(Integer roleId) {
+        String roleCube = lookupRoleCubeId(roleId);
+        if (StringUtils.hasText(roleCube)) {
+            return List.of(roleCube.trim());
+        }
+        return props.parseReadableCubeIds();
+    }
+
+    private String lookupRoleCubeId(Integer roleId) {
+        if (roleId == null) {
+            return null;
+        }
+        try {
+            RoleCard role = roleCardMapper.findById(roleId);
+            if (role != null && StringUtils.hasText(role.getMemosCubeId())) {
+                return role.getMemosCubeId().trim();
+            }
+        } catch (Exception e) {
+            log.warn("读取角色 memos_cube_id 失败 roleId={}: {}", roleId, e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * 提交 /product/add 并校验 MemReader 是否产出记忆。
+     * 写入固定 sync：async 仅返回 200 时 data 可能为空，MemReader 失败也无从感知。
+     */
+    private boolean submitAdd(Map<String, Object> body, String userId, Integer roleId,
+                              String sessionId, String kind) {
+        String resp = post("/product/add", body);
+        if (!StringUtils.hasText(resp)) {
+            log.warn("MemOS add {} failed: empty HTTP response, userId={}, roleId={}, sessionId={}",
+                    kind, userId, roleId, sessionId);
+            return false;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(resp);
+            int code = root.path("code").asInt(-1);
+            if (code != 200) {
+                log.warn("MemOS add {} failed: code={}, message={}, roleId={}, sessionId={}",
+                        kind, code, root.path("message").asText(""), roleId, sessionId);
+                return false;
+            }
+            JsonNode data = root.path("data");
+            int extracted = data.isArray() ? data.size() : 0;
+            if (extracted == 0) {
+                log.warn("MemOS add {} returned 200 but no extracted memories, roleId={}, sessionId={}, body={}",
+                        kind, roleId, sessionId, summarizeUserContent(body));
+                return false;
+            }
+            log.info("MemOS add {} ok: roleId={}, sessionId={}, memories={}", kind, roleId, sessionId, extracted);
+            return true;
+        } catch (Exception e) {
+            log.warn("MemOS add {} parse failed: roleId={}, sessionId={}, err={}", kind, roleId, sessionId, e.getMessage());
+            return false;
+        }
+    }
+
+    private String summarizeUserContent(Map<String, Object> body) {
+        Object messages = body.get("messages");
+        if (!(messages instanceof List<?> list) || list.isEmpty()) {
+            return "";
+        }
+        Object first = list.get(0);
+        if (first instanceof Map<?, ?> msg) {
+            Object content = msg.get("content");
+            if (content != null) {
+                String text = content.toString();
+                return text.length() > 40 ? text.substring(0, 40) + "..." : text;
+            }
+        }
+        return "";
+    }
+
     // ======================== Internal ========================
 
     private String post(String path, Map<String, Object> body) {
@@ -462,7 +559,7 @@ public class MemosClient {
      *   data.text_mem[].memories[].metadata.relativity    —— 相关性
      *   data.pref_mem[].memories[]                        —— 偏好记忆（独立分组）
      */
-    private SearchResult parseStructuredResponse(String body, int topK) {
+    private SearchResult parseStructuredResponse(String body, int topK, Integer roleId) {
         try {
             JsonNode root = objectMapper.readTree(body);
             JsonNode data = root.path("data");
@@ -476,7 +573,7 @@ public class MemosClient {
             List<MemoryItem> others = new ArrayList<>();
 
             // text_mem 分组：UserMemory / LongTermMemory / WorkingMemory 都在这里
-            collectFromGroup(data.path("text_mem"), (item) -> {
+            collectFromGroup(data.path("text_mem"), roleId, (item) -> {
                 switch (item.type()) {
                     case USER -> userMems.add(item);
                     case LONG_TERM -> longTermMems.add(item);
@@ -486,7 +583,7 @@ public class MemosClient {
             });
 
             // pref_mem 分组：明确为偏好记忆
-            collectFromGroup(data.path("pref_mem"), (item) -> {
+            collectFromGroup(data.path("pref_mem"), roleId, (item) -> {
                 MemoryItem normalized = item.type() == MemoryType.UNKNOWN
                         ? new MemoryItem(item.id(), item.text(), MemoryType.PREFERENCE, item.relativity())
                         : item;
@@ -510,20 +607,24 @@ public class MemosClient {
      * 从 text_mem / pref_mem 这种分组节点中遍历 cube → memories → 单条记忆。
      * 节点结构：[ { cube_id, memories:[{id, memory, metadata:{memory_type, relativity}}] } ]
      */
-    private void collectFromGroup(JsonNode groupNode, java.util.function.Consumer<MemoryItem> consumer) {
+    private void collectFromGroup(JsonNode groupNode, Integer roleId,
+                                  java.util.function.Consumer<MemoryItem> consumer) {
         if (groupNode == null || !groupNode.isArray()) return;
         for (JsonNode cube : groupNode) {
             JsonNode memories = cube.path("memories");
             if (!memories.isArray()) continue;
             for (JsonNode mem : memories) {
-                MemoryItem item = parseMemoryItem(mem);
+                MemoryItem item = parseMemoryItem(mem, roleId);
                 if (item != null) consumer.accept(item);
             }
         }
     }
 
-    private MemoryItem parseMemoryItem(JsonNode node) {
+    private MemoryItem parseMemoryItem(JsonNode node, Integer roleId) {
         if (node == null || !node.isObject()) return null;
+        if (roleId != null && !matchesRoleSession(node.path("metadata"), roleId)) {
+            return null;
+        }
         String text = pickTextField(node);
         if (!StringUtils.hasText(text)) return null;
         text = normalize(text);
@@ -534,6 +635,22 @@ public class MemosClient {
         double relativity = metadata.path("relativity").asDouble(0.0);
 
         return new MemoryItem(id, text, MemoryType.from(typeRaw), relativity);
+    }
+
+    /**
+     * 按 metadata.session_id 硬过滤角色记忆。
+     * MemReader 不保留 info.role_id，但会保留写入时的 session_id（实测 role_1 / role_6 等）。
+     */
+    private boolean matchesRoleSession(JsonNode metadata, Integer roleId) {
+        if (roleId == null) {
+            return true;
+        }
+        String expected = roleSessionId(roleId);
+        String actual = metadata.path("session_id").asText("");
+        if (expected.equals(actual)) {
+            return true;
+        }
+        return props.isIncludeLegacyMemories() && LEGACY_SESSION_ID.equals(actual);
     }
 
     private List<MemoryItem> sortByRelativity(List<MemoryItem> list) {

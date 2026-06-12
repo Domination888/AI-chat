@@ -2,13 +2,13 @@ package org.example.aichat.config;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.context.annotation.Configuration;
+import org.springframework.stereotype.Component;
 
 import java.util.Arrays;
 import java.util.List;
 
 @Data
-@Configuration
+@Component
 @ConfigurationProperties(prefix = "memos")
 public class MemosProperties {
 
@@ -18,8 +18,8 @@ public class MemosProperties {
     private int connectTimeoutMs = 3000;
     private int readTimeoutMs = 8000;
     private int searchTopK = 10;
-    private String asyncMode = "async";
-    private boolean roleFilterEnabled = false;
+    /** add 建议 sync，确保 MemReader 加工完成后再返回 */
+    private String asyncMode = "sync";
     private boolean fallbackToRag = true;
 
     /** 固定的 Memos user_id（UUID 格式），纯个人项目所有对话共享同一用户 */
@@ -36,6 +36,11 @@ public class MemosProperties {
     private boolean includePreference = true;
     /** 偏好记忆 top_k */
     private int prefTopK = 6;
+    /**
+     * 多角色隔离时是否包含 session_id=default_session 的旧记忆。
+     * 默认 false：只读当前角色 role_{id} 桶内记忆。
+     */
+    private boolean includeLegacyMemories = false;
 
     /**
      * 获取 Memos user_id。

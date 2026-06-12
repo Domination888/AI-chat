@@ -1,9 +1,10 @@
 package org.example.aichat.util;
 
+import dev.langchain4j.agent.tool.ToolSpecification;
+import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.data.message.AiMessage;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
@@ -45,12 +46,17 @@ public class PromptLogger {
      * @param messages       发给 LLM 的消息列表
      */
     public synchronized void log(String conversationId, List<ChatMessage> messages) {
+        log(conversationId, messages, List.of());
+    }
+
+    public synchronized void log(String conversationId, List<ChatMessage> messages,
+                                 List<ToolSpecification> toolSpecs) {
         try {
             // 1. 读取现有文件中的条目
             List<String> entries = readExistingEntries();
 
             // 2. 构建新条目
-            String newEntry = buildEntry(conversationId, messages);
+            String newEntry = buildEntry(conversationId, messages, toolSpecs);
             entries.add(newEntry);
 
             // 3. 只保留最近 MAX_ENTRIES 条
@@ -106,12 +112,14 @@ public class PromptLogger {
     /**
      * 构建单条 prompt 日志文本
      */
-    private String buildEntry(String conversationId, List<ChatMessage> messages) {
+    private String buildEntry(String conversationId, List<ChatMessage> messages,
+                              List<ToolSpecification> toolSpecs) {
         String timestamp = LocalDateTime.now().format(TIME_FMT);
         StringBuilder sb = new StringBuilder();
         sb.append("Time: ").append(timestamp).append("\n");
         sb.append("ConversationId: ").append(conversationId).append("\n");
         sb.append("MessageCount: ").append(messages.size()).append("\n");
+        sb.append("ToolCount: ").append(toolSpecs == null ? 0 : toolSpecs.size()).append("\n");
         sb.append("-".repeat(40)).append("\n\n");
 
         for (int i = 0; i < messages.size(); i++) {
@@ -120,6 +128,18 @@ public class PromptLogger {
             String content = extractContent(msg);
             sb.append("[").append(i).append("] ").append(role).append(":\n");
             sb.append(content).append("\n\n");
+        }
+
+        if (toolSpecs != null && !toolSpecs.isEmpty()) {
+            sb.append("[TOOLS] API toolSpecifications (").append(toolSpecs.size()).append("):\n");
+            for (ToolSpecification spec : toolSpecs) {
+                sb.append("- ").append(spec.name());
+                if (spec.description() != null && !spec.description().isBlank()) {
+                    sb.append("：").append(spec.description().trim());
+                }
+                sb.append("\n");
+            }
+            sb.append("\n");
         }
         return sb.toString();
     }

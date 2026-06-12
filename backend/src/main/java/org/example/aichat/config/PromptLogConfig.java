@@ -1,5 +1,6 @@
 package org.example.aichat.config;
 
+import org.example.aichat.util.LatencyLogger;
 import org.example.aichat.util.PromptLogger;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -18,5 +19,11 @@ public class PromptLogConfig {
     public PromptLogger promptLogger() {
         Path baseDir = Path.of(logBaseDir).resolve("backend");
         return new PromptLogger(baseDir);
+    }
+
+    @Bean
+    public LatencyLogger latencyLogger() {
+        Path baseDir = Path.of(logBaseDir).resolve("backend");
+        return new LatencyLogger(baseDir);
     }
 }

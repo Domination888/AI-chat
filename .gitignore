@@ -63,6 +63,14 @@ __pycache__/
 unified-logs/pids/
 *.pid
 
+### MCP / 技能 / 全链路运行时配置（前端 UI 热更新，含本机 IP） ###
+config/mcp-servers.json
+config/runtime-config.json
+config/skills/
+
+### SearXNG 本地实例数据（含 secret_key，按需保留 settings.yml 但忽略缓存） ###
+services/searxng/searxng/*.toml
+
 ### Model weights & training artifacts ###
 *.ckpt
 *.pth
@@ -77,4 +85,8 @@ unified-logs/pids/
 *.sql.bak
 
 ### 学习项目 ###
-my-neuro
+my-neuro/
+MemOS/
+
+client/src/dist/
+client/src/node_modules/

@@ -42,19 +42,21 @@ public class VoiceServiceImpl implements VoiceService {
 
     @PostConstruct
     public void initAsrClient() {
+        refreshAsrClient();
+        this.strategyMap = strategies.stream()
+                .collect(Collectors.toMap(TtsStrategy::engineName, s -> s));
+        log.info("TTS engine: {}, available strategies: {}, profiles: {}",
+                voiceProps.getTtsEngine(), strategyMap.keySet(), voiceProps.getTtsProfiles().keySet());
+    }
+
+    /** 运行时配置变更后重建 ASR HTTP 客户端 */
+    public void refreshAsrClient() {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(3000);
         factory.setReadTimeout(voiceProps.getAsrTimeoutMs());
         this.asrRestTemplate = new RestTemplate(factory);
-
-        // 构建 strategyMap
-        this.strategyMap = strategies.stream()
-                .collect(Collectors.toMap(TtsStrategy::engineName, s -> s));
-
         log.info("ASR client ready: url={}, language={}, timeoutMs={}",
                 voiceProps.getAsrUrl(), voiceProps.getAsrLanguage(), voiceProps.getAsrTimeoutMs());
-        log.info("TTS engine: {}, available strategies: {}, profiles: {}",
-                voiceProps.getTtsEngine(), strategyMap.keySet(), voiceProps.getTtsProfiles().keySet());
     }
 
     /**

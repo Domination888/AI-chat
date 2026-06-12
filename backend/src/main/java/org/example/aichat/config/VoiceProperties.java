@@ -2,7 +2,7 @@ package org.example.aichat.config;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.context.annotation.Configuration;
+import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -14,7 +14,7 @@ import java.util.Map;
  * 采样率 32000Hz，通过 avatarId 选择音色。
  */
 @Data
-@Configuration
+@Component
 @ConfigurationProperties(prefix = "voice")
 public class VoiceProperties {
 
@@ -26,8 +26,8 @@ public class VoiceProperties {
     // -------- TTS (Astra / Genie-TTS on Win :5000) --------
     /** TTS 引擎：astra（唯一选项） */
     private String ttsEngine = "astra";
-    /** Astra TTS 服务基础 URL（Win :5000） */
-    private String astraTtsBaseUrl = "http://192.168.124.2:5000";
+    /** Astra TTS 服务基础 URL */
+    private String astraTtsBaseUrl;
     /** Astra 默认 avatarId（兜底音色） */
     private String astraDefaultAvatarId = "chenxing";
     /** Astra 流式分片大小（predict-stream chunkSize 参数） */

@@ -3,9 +3,7 @@ package org.example.aichat.config;
 import dev.langchain4j.http.client.spring.restclient.SpringRestClientBuilder;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
-import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
-import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -39,12 +37,6 @@ public class LlmConfig {
     @Value("${llm.max-retries:1}")
     private int llmMaxRetries;
 
-    @Value("${embedding.base-url}")
-    private String embeddingBaseUrl;
-
-    @Value("${embedding.model-name}")
-    private String embeddingModelName;
-
     @Bean
     public StreamingChatModel streamingChatModel() {
         return OpenAiStreamingChatModel.builder()
@@ -69,17 +61,4 @@ public class LlmConfig {
                 .build();
     }
 
-    /**
-     * EmbeddingModel for RAG 向量检索
-     */
-    @Bean
-    public EmbeddingModel embeddingModel() {
-        return OpenAiEmbeddingModel.builder()
-                .baseUrl(embeddingBaseUrl)
-                .modelName(embeddingModelName)
-                .timeout(Duration.ofMillis(llmReadTimeoutMs))
-                .maxRetries(llmMaxRetries)
-                .httpClientBuilder(new SpringRestClientBuilder())
-                .build();
-    }
 }

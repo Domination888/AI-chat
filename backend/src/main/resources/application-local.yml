@@ -15,36 +15,30 @@ mybatis:
   configuration:
     map-underscore-to-camel-case: true
 
-mcp:
-  zhipu:
-    search-url: https://open.bigmodel.cn/api/mcp/web_search/sse
-    api-key: b10d5aa03c3348b688c51fc00cd4dbfb.uFxrmeRwiuFGNhpe
-  local:
-    enabled: true
-    # prime-mcp-server fat jar 路径；支持：
-    #   1) 相对路径（相对后端启动时的工作目录，默认就是项目根）
-    #   2) 绝对路径
-    #   3) 环境变量 PRIME_MCP_JAR 覆盖（最高优先级）
-    # 修改打包规则前：cd prime-mcp-server && ../mvnw package
-    jar-path: ${PRIME_MCP_JAR:prime-mcp-server/target/prime-mcp-server-1.0.0.jar}
-    # 启动命令的前缀（逗号分隔）；默认 java -jar，可改为 java,-Xmx256m,-jar 等
-    java-args: "java,-jar"
+# MCP 服务器不再写死在这里：改为配置驱动的注册中心（config/mcp-servers.json），
+# 可在前端「设置 - MCP 服务器」里增删改、热重载。联网搜索由本地 SearXNG MCP 提供（已去除智谱）。
+app:
+  # config 目录与项目根：留空自动推断（后端工作目录为 backend/ 时取其父目录）
+  project-root: ""
+  config-dir: config
 
 memos:
   enabled: true
   base-url: http://localhost:8000
   api-key: ""
   connect-timeout-ms: 3000
-  read-timeout-ms: 8000
+  read-timeout-ms: 30000
   # 固定的 Memos user_id（UUID 格式）—— 纯个人项目，所有对话共享同一用户
   user-id: "8736b16e-1d20-4163-980b-a5063c3facdc"
   # 搜索 top_k：Memos 默认 10，比旧值 3 大以利用 Memos 的去重和排序
   search-top-k: 10
-  async-mode: async
-  # writable/readable cube IDs：对应 Memos 的记忆隔离容器，逗号分隔
-  # 从 Memos curl 测试用例中获取的 cube_id
+  async-mode: sync
+  # 全局默认 cube（Memos 官方隔离单元，见 https://memos-docs.openmem.net/open_source/modules/mem_cube ）
+  # 角色可在 role_card.memos_cube_id 覆盖；每角色独立 cube 需在 Memos 侧先 register_mem_cube
   writable-cube-ids: "b32d0977-435d-4828-a86f-4f47f8b55bca"
   readable-cube-ids: "b32d0977-435d-4828-a86f-4f47f8b55bca"
+  # 多角色时默认只读 session_id=role_{roleId} 的记忆；true 则兼容旧 default_session 数据
+  include-legacy-memories: false
   # 搜索模式：fast（快，仅 working_memory）/ fine（精细，全量 vector+graph）/ mixture（混合，推荐）
   search-mode: mixture
   # 相关性阈值：低于此值的记忆不返回，0 = 不过滤
@@ -52,7 +46,6 @@ memos:
   # 是否包含用户偏好记忆
   include-preference: true
   pref-top-k: 6
-  role-filter-enabled: false
   fallback-to-rag: true
 
 rag:
@@ -121,7 +114,6 @@ voice:
       speed-factor: 1.0
       temperature: 1.0
       top-k: 15
-    # 兜底：角色卡里预置的 voice_id 暂时都复用黍
-    liuli_v1: { display-name: "琉璃(复用黍)", alias-of: shu }
-    xingye_v1: { display-name: "星野(复用黍)", alias-of: shu }
-    k_v1: { display-name: "赛博K(复用黍)", alias-of: shu }
+    # 占位角色：暂时复用黍音色
+    m3_v1: { display-name: "m3(复用黍)", alias-of: shu }
+    hiro_v1: { display-name: "二阶堂希罗(复用黍)", alias-of: shu }

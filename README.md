@@ -50,8 +50,14 @@ AI-Chat/
 ### 2. 初始化数据库
 
 ```bash
+# 推荐：项目脚本（不依赖 mysql 是否在 PATH）
+./scripts/local-db.sh mysql < backend/init.sql
+
+# 或直连（需 ~/.zshrc 已配置 MySQL PATH）
 mysql -uroot -p < backend/init.sql
 ```
+
+本机 MySQL / Redis 连接说明见 [`AGENTS.md`](AGENTS.md) 与 [`config/local-services.env`](config/local-services.env)。
 
 ### 3. 一键启动开发环境
 

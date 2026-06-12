@@ -10,6 +10,5 @@ public class History {
     private String conversationId;
     private String sender;
     private String content;
-    private Integer tokenCount;
     private LocalDateTime createdAt;
 }

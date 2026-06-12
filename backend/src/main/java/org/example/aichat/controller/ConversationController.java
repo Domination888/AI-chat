@@ -5,7 +5,6 @@ import org.example.aichat.dto.Conversation;
 import org.example.aichat.dto.History;
 import org.example.aichat.mapper.ConversationMapper;
 import org.example.aichat.mapper.HistoryMapper;
-import org.example.aichat.mapper.MemoryMapper;
 import org.example.aichat.util.EmotionTagNormalizer;
 import org.springframework.web.bind.annotation.*;
 
@@ -18,7 +17,6 @@ public class ConversationController {
 
     private final ConversationMapper conversationMapper;
     private final HistoryMapper historyMapper;
-    private final MemoryMapper memoryMapper;
 
     @GetMapping("/user/{userId}")
     public List<Conversation> getUserConversations(@PathVariable Integer userId) {
@@ -47,6 +45,5 @@ public class ConversationController {
     @DeleteMapping("/{conversationId}")
     public void deleteConversation(@PathVariable String conversationId) {
         historyMapper.deleteByConversationId(conversationId);
-        memoryMapper.deleteByConversationId(conversationId);
         conversationMapper.deleteById(conversationId);
     }}

@@ -16,13 +16,13 @@ import org.springframework.stereotype.Component;
 public class LlmProperties {
 
     /** LLM API 地址（OpenAI 兼容），默认从 yml 读取 */
-    private String baseUrl = "http://192.168.124.2:1234/v1";
+    private String baseUrl;
 
     /** 模型名称 */
-    private String modelName = "gemma-4-31b-it";
+    private String modelName;
 
     /** 流式模型名称（默认同 modelName） */
-    private String streamingModelName = "gemma-4-31b-it";
+    private String streamingModelName;
 
     /** 连接超时（ms），默认 3000 */
     private long connectTimeoutMs = 3000;

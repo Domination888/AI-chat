@@ -1,0 +1,29 @@
+# SearXNG —— 本地开源元搜索引擎，替代智谱 Web Search MCP 作为联网搜索后端。
+# 暴露在 8888 端口（避开后端 Spring Boot 的 8080）。
+# 启动： docker compose -f services/searxng/docker-compose.yml up -d
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    restart: unless-stopped
+    ports:
+      - "8888:8080"
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      # 对外基础 URL（仅用于生成绝对链接，本地用无所谓）
+      - SEARXNG_BASE_URL=http://localhost:8888/
+      # 进程数（本地够用）
+      - UWSGI_WORKERS=4
+      - UWSGI_THREADS=4
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "1"

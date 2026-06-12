@@ -19,7 +19,7 @@ import java.util.List;
  * <p>
  * - getMessages：只加载最近 LOAD_RECENT 条消息，供 ChatMemory 作为上下文窗口
  * - updateMessages：只追加最后一条新消息到 history 表，绝不删除历史记录
- * - history 表保持完整的对话日志，token_count 不会被重算
+ * - history 表保持完整的对话日志
  */
 @Slf4j
 @Component
@@ -65,8 +65,7 @@ public class MysqlChatMemoryStore implements ChatMemoryStore {
         History h = toHistory(conversationId, lastMsg);
         if (h != null) {
             historyMapper.insert(h);
-            log.debug("追加消息到会话 {}: sender={}, tokenCount={}",
-                    conversationId, h.getSender(), h.getTokenCount());
+            log.debug("追加消息到会话 {}: sender={}", conversationId, h.getSender());
         }
     }
 
@@ -125,7 +124,6 @@ public class MysqlChatMemoryStore implements ChatMemoryStore {
             return null; // 不存储 SystemMessage
         }
 
-        h.setTokenCount(h.getContent() != null ? h.getContent().length() / 2 : 0);
         return h;
     }
 }

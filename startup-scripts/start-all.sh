@@ -10,8 +10,6 @@ LOG_DIR="$PROJECT_ROOT/unified-logs"
 PID_DIR="$LOG_DIR/pids"
 PID_FILE="$PID_DIR/pids.txt"
 
-# 创建日志目录
-mkdir -p "$LOG_DIR"/{backend,frontend,client,electron,asr,tts}
 mkdir -p "$PID_DIR"
 
 # 启动前清空 pids.txt，避免历史残留 PID 越积越多
@@ -74,11 +72,27 @@ resolve_port_pid() {
     lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | sort -n | head -1
 }
 
+# 启动 SearXNG（本地联网搜索后端，Docker）
+start_searxng() {
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "⚠️  Docker 未安装，跳过 SearXNG（联网搜索将不可用）"
+        return 0
+    fi
+    echo "🔎 Starting SearXNG (Docker, :8888)..."
+    docker compose -f "$PROJECT_ROOT/services/searxng/docker-compose.yml" up -d >/dev/null 2>&1 || true
+    if check_service "http://localhost:8888/search?q=test&format=json" "SearXNG"; then
+        :
+    else
+        echo "⚠️  SearXNG 未就绪，可稍后 docker logs searxng 查看"
+    fi
+}
+
 # 启动后端
 start_backend() {
     check_and_kill_port 8080
 
     echo "📦 Starting Spring Boot backend..."
+    mkdir -p "$LOG_DIR/backend"
     cd "$PROJECT_ROOT/backend"
     ./mvnw spring-boot:run > "$LOG_DIR/backend/app.log" 2>&1 &
     cd "$PROJECT_ROOT"
@@ -96,6 +110,7 @@ start_frontend() {
     check_and_kill_port 3000
 
     echo "🎨 Starting Vite frontend server..."
+    mkdir -p "$LOG_DIR/frontend"
     cd "$PROJECT_ROOT/client/src"
     npm run dev > "$LOG_DIR/frontend/app.log" 2>&1 &
     cd "$PROJECT_ROOT"
@@ -112,8 +127,14 @@ start_frontend() {
 start_client() {
     echo "🖥️  Starting Electron client..."
     cd "$PROJECT_ROOT/client"
-    npx electron . > "$LOG_DIR/client/app.log" 2>&1 &
-    ELECTRON_PID=$!
+    # Electron 平时几乎无有效 stdout；设 CLIENT_LOG=1 才写入 unified-logs/client/app.log
+    if [ "${CLIENT_LOG:-}" = "1" ]; then
+        mkdir -p "$LOG_DIR/client"
+        npx electron . > "$LOG_DIR/client/app.log" 2>&1 &
+    else
+        npx electron . >/dev/null 2>&1 &
+    fi
+    CLIENT_PID=$!
     cd "$PROJECT_ROOT"
     echo "✅ Electron client is starting..."
 }
@@ -123,6 +144,7 @@ start_asr() {
     check_and_kill_port 9000
 
     echo "🎤 Starting SenseVoice ASR service..."
+    mkdir -p "$LOG_DIR/asr"
     cd "$PROJECT_ROOT/services/sense-voice"
     python server.py > "$LOG_DIR/asr/app.log" 2>&1 &
     cd "$PROJECT_ROOT"
@@ -153,6 +175,7 @@ show_status() {
     echo "🎯 AI-Chat Development Environment is ready!"
     echo "📱 Frontend: http://localhost:3000"
     echo "🔧 Backend: http://localhost:8080/api/health"
+    echo "🔎 SearXNG: http://localhost:8888 (本地联网搜索)"
     echo "🎤 ASR: http://localhost:9000/healthz"
     echo "🔊 TTS: http://192.168.124.2:5000 (Astra on Win)"
     echo "🖥️  Electron: Desktop app should appear"
@@ -160,7 +183,7 @@ show_status() {
     echo "📊 Unified Logs Location: $LOG_DIR/"
     echo "   Backend: $LOG_DIR/backend/app.log"
     echo "   Frontend: $LOG_DIR/frontend/app.log"
-    echo "   Client: $LOG_DIR/client/app.log"
+    echo "   Client: CLIENT_LOG=1 时写入 $LOG_DIR/client/app.log"
     echo "   ASR: $LOG_DIR/asr/app.log"
     echo "   TTS: remote Astra service on Win (no local log)"
     echo ""
@@ -183,13 +206,14 @@ upsert_pid() {
 save_pids() {
     upsert_pid "backend" "$BACKEND_PID"
     upsert_pid "frontend" "$FRONTEND_PID"
-    upsert_pid "electron" "$ELECTRON_PID"
+    upsert_pid "client" "$CLIENT_PID"
     upsert_pid "asr" "$ASR_PID"
 }
 
 # 主流程
 main() {
     # 启动各个服务
+    start_searxng
     start_backend
     start_frontend
     start_client

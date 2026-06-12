@@ -1,0 +1,33 @@
+# SearXNG 配置 —— 关键点：开启 JSON 输出格式，关闭 limiter 以便后端 MCP server 直接调用 /search?format=json
+use_default_settings: true
+
+general:
+  instance_name: "AI-Chat Search"
+  # 关闭统计/隐私页等无关入口，纯当后端搜索 API 用
+  enable_metrics: false
+
+server:
+  # 用 openssl rand -hex 32 生成；仅本地使用
+  secret_key: "9216795b0dd3c5c232e5bf76c169afbbe33c96d1263b8def1184b3f9bd60dddb"
+  # 关闭限流，否则非浏览器（后端程序化）请求会被 403 拦截
+  limiter: false
+  image_proxy: true
+  # 允许跨来源的 JSON 调用
+  method: "GET"
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "zh-CN"
+  # 必须包含 json，后端 MCP server 走 format=json
+  formats:
+    - html
+    - json
+
+ui:
+  static_use_hash: true
+
+# 关闭机器人检测（本地内网，无需防爬）
+botdetection:
+  ip_limit:
+    link_token: false
