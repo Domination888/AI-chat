@@ -4,24 +4,27 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
 /**
  * 统一解析项目相关路径。
  *
- * 后端通常以 backend/ 作为工作目录（mvnw spring-boot:run），但脚本也可能在项目根启动，
- * 这里统一把"项目根"规整出来，让 config/ 目录、各 MCP jar 的相对路径在两种情况下都能解析正确。
+ * 开发：后端以 backend/ 为 cwd，项目根为父目录。
+ * 打包：Electron 注入 AI_CHAT_HOME（只读 runtime）与 AI_CHAT_DATA（可写数据），
+ *       config 优先落在 AI_CHAT_DATA/config。
  */
 @Slf4j
 @Component
 public class AppPaths {
 
-    /** 可显式覆盖项目根（绝对路径）；留空则自动推断 */
     @Value("${app.project-root:}")
     private String configuredRoot;
 
-    /** config 目录（相对项目根） */
+    @Value("${app.user-data-dir:}")
+    private String userDataDir;
+
     @Value("${app.config-dir:config}")
     private String configDirName;
 
@@ -36,7 +39,28 @@ public class AppPaths {
         return cwd;
     }
 
+    public Path userDataRoot() {
+        if (userDataDir != null && !userDataDir.isBlank()) {
+            return Paths.get(userDataDir).toAbsolutePath().normalize();
+        }
+        String env = System.getenv("AI_CHAT_DATA");
+        if (env != null && !env.isBlank()) {
+            return Paths.get(env).toAbsolutePath().normalize();
+        }
+        return null;
+    }
+
     public Path configDir() {
+        Path userData = userDataRoot();
+        if (userData != null) {
+            Path dir = userData.resolve(configDirName).normalize();
+            try {
+                Files.createDirectories(dir);
+            } catch (Exception e) {
+                log.warn("创建用户 config 目录失败: {}", e.getMessage());
+            }
+            return dir;
+        }
         Path dir = Paths.get(configDirName);
         if (!dir.isAbsolute()) {
             dir = projectRoot().resolve(dir);
@@ -56,12 +80,30 @@ public class AppPaths {
         return configDir().resolve("skills");
     }
 
-    /** 把相对路径（如 services/xxx/target/xxx.jar）解析为基于项目根的绝对路径。 */
     public Path resolveAgainstRoot(String raw) {
         Path p = Paths.get(raw);
         if (!p.isAbsolute()) {
             p = projectRoot().resolve(p);
         }
         return p.normalize();
+    }
+
+    /** 打包模式下 MCP/后端使用的 java 可执行文件（若存在 bundled JRE）。 */
+    public String bundledJavaCommand() {
+        Path jreJava = projectRoot().resolve("jre/bin/java");
+        if (Files.isExecutable(jreJava)) {
+            return jreJava.toAbsolutePath().toString();
+        }
+        if (System.getProperty("os.name", "").toLowerCase().contains("win")) {
+            Path winJava = projectRoot().resolve("jre/bin/java.exe");
+            if (Files.isExecutable(winJava)) {
+                return winJava.toAbsolutePath().toString();
+            }
+        }
+        return "java";
+    }
+
+    public boolean isPackagedLayout() {
+        return userDataRoot() != null || (configuredRoot != null && !configuredRoot.isBlank());
     }
 }

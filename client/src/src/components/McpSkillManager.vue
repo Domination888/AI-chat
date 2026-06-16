@@ -204,6 +204,7 @@
 <script setup>
 import { ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { apiFetch } from '../utils/api.js'
 
 const props = defineProps({ show: { type: Boolean, default: false } })
 defineEmits(['close'])
@@ -224,7 +225,7 @@ watch(() => props.show, (v) => { if (v) { loadServers(); loadSkills() } })
 // ---------------- MCP ----------------
 async function loadServers() {
   try {
-    const res = await fetch('/api/mcp/servers')
+    const res = await apiFetch('/api/mcp/servers')
     servers.value = await res.json()
   } catch (e) { ElMessage.error('加载 MCP 服务器失败') }
 }
@@ -276,7 +277,7 @@ async function saveServer() {
   if (!serverForm.value.name) { ElMessage.warning('请填写名称'); return }
   busy.value = true
   try {
-    const res = await fetch('/api/mcp/servers', {
+    const res = await apiFetch('/api/mcp/servers', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(buildServerPayload()),
     })
@@ -290,7 +291,7 @@ async function saveServer() {
 async function testServer() {
   busy.value = true
   try {
-    const res = await fetch('/api/mcp/servers/test', {
+    const res = await apiFetch('/api/mcp/servers/test', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(buildServerPayload()),
     })
@@ -303,7 +304,7 @@ async function testServer() {
 async function toggleServer(item) {
   const payload = { ...item.config, enabled: !item.config.enabled }
   try {
-    await fetch('/api/mcp/servers', {
+    await apiFetch('/api/mcp/servers', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
@@ -316,7 +317,7 @@ async function deleteServer(cfg) {
     await ElMessageBox.confirm(`确定删除 MCP 服务器「${cfg.name}」？`, '确认', { type: 'warning' })
   } catch { return }
   try {
-    const res = await fetch(`/api/mcp/servers/${cfg.id}`, { method: 'DELETE' })
+    const res = await apiFetch(`/api/mcp/servers/${cfg.id}`, { method: 'DELETE' })
     if (!res.ok) { const d = await res.json(); throw new Error(d.message) }
     ElMessage.success('已删除')
     await loadServers()
@@ -325,7 +326,7 @@ async function deleteServer(cfg) {
 
 async function reloadAll() {
   try {
-    await fetch('/api/mcp/reload', { method: 'POST' })
+    await apiFetch('/api/mcp/reload', { method: 'POST' })
     ElMessage.success('已重载')
     await loadServers()
   } catch (e) { ElMessage.error('重载失败') }
@@ -334,7 +335,7 @@ async function reloadAll() {
 // ---------------- Skills ----------------
 async function loadSkills() {
   try {
-    const res = await fetch('/api/skills')
+    const res = await apiFetch('/api/skills')
     skills.value = await res.json()
   } catch (e) { ElMessage.error('加载技能失败') }
 }
@@ -359,7 +360,7 @@ async function saveSkill() {
     instructions: f.instructions, dirName: f.dirName || undefined,
   }
   try {
-    const res = await fetch('/api/skills', {
+    const res = await apiFetch('/api/skills', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
@@ -372,7 +373,7 @@ async function saveSkill() {
 
 async function toggleSkill(s) {
   try {
-    await fetch(`/api/skills/${encodeURIComponent(s.name)}/toggle?enabled=${!s.enabled}`, { method: 'PUT' })
+    await apiFetch(`/api/skills/${encodeURIComponent(s.name)}/toggle?enabled=${!s.enabled}`, { method: 'PUT' })
     await loadSkills()
   } catch (e) { ElMessage.error('操作失败') }
 }
@@ -382,7 +383,7 @@ async function deleteSkill(s) {
     await ElMessageBox.confirm(`确定删除技能「${s.name}」？`, '确认', { type: 'warning' })
   } catch { return }
   try {
-    await fetch(`/api/skills/${encodeURIComponent(s.name)}`, { method: 'DELETE' })
+    await apiFetch(`/api/skills/${encodeURIComponent(s.name)}`, { method: 'DELETE' })
     ElMessage.success('已删除')
     await loadSkills()
   } catch (e) { ElMessage.error('删除失败') }

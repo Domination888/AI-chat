@@ -3,6 +3,7 @@ spring:
     name: AI-Chat
   profiles:
     active: local
+    # 打包版由 Electron 启动时传入: --spring.profiles.active=packaged
 
 server:
   port: 8080

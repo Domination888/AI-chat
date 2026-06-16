@@ -1,0 +1,83 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  data:
+    redis:
+      host: 127.0.0.1
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://127.0.0.1:3306/ai_chat?useSSL=false&serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=UTF-8&connectionCollation=utf8mb4_unicode_ci&allowPublicKeyRetrieval=true}
+    username: root
+    password: ""
+
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: org.example.aichat.dto
+  configuration:
+    map-underscore-to-camel-case: true
+
+app:
+  project-root: ${AI_CHAT_HOME:}
+  user-data-dir: ${AI_CHAT_DATA:}
+  config-dir: config
+
+memos:
+  enabled: true
+  base-url: ${AI_CHAT_MEMOS_URL:http://127.0.0.1:8000}
+  api-key: ""
+  connect-timeout-ms: 3000
+  read-timeout-ms: 30000
+  user-id: "8736b16e-1d20-4163-980b-a5063c3facdc"
+  search-top-k: 10
+  async-mode: sync
+  writable-cube-ids: "b32d0977-435d-4828-a86f-4f47f8b55bca"
+  readable-cube-ids: "b32d0977-435d-4828-a86f-4f47f8b55bca"
+  include-legacy-memories: false
+  search-mode: mixture
+  relativity: 0.4
+  include-preference: true
+  pref-top-k: 6
+  fallback-to-rag: true
+
+rag:
+  chunk-size: 500
+  chunk-overlap: 80
+  max-context-chars: 2400
+  embedding-batch-size: 32
+  eager-init: true
+  force-rebuild-on-startup: false
+
+llm:
+  base-url: http://127.0.0.1:1234/v1
+  model-name: gemma4-e4b
+  streaming-model-name: gemma4-e4b
+  connect-timeout-ms: 3000
+  read-timeout-ms: 60000
+  max-retries: 1
+
+embedding:
+  base-url: http://127.0.0.1:1234/v1
+  model-name: text-embedding-embeddinggemma-300m
+
+voice:
+  asr-url: ${AI_CHAT_ASR_URL:http://127.0.0.1:9000/v1/audio/transcriptions}
+  asr-language: auto
+  asr-timeout-ms: 15000
+  tts-engine: astra
+  astra-tts-base-url: http://127.0.0.1:5000
+  astra-default-avatar-id: chenxing
+  astra-streaming-chunk-size: 2048
+  tts-timeout-ms: 60000
+  tts-default-profile: shu
+  tts-profiles:
+    shu:
+      display-name: "黍（默认）"
+      astra-avatar-id: Shu_v2proplus
+      text-lang: zh
+      speed-factor: 1.0
+      temperature: 1.0
+      top-k: 15
+    m3_v1: { display-name: "m3(复用黍)", alias-of: shu }
+    hiro_v1: { display-name: "二阶堂希罗(复用黍)", alias-of: shu }

@@ -152,6 +152,14 @@ public class McpServerStore {
     /** 内置默认 MCP 服务器。 */
     private List<McpServerConfig> defaults() {
         List<McpServerConfig> list = new ArrayList<>();
+        boolean packaged = appPaths.isPackagedLayout();
+        String javaCmd = packaged ? appPaths.bundledJavaCommand() : "java";
+        String searxngJar = packaged
+                ? "mcp/searxng-mcp-server-1.0.0.jar"
+                : "services/searxng-mcp-server/target/searxng-mcp-server-1.0.0.jar";
+        String primeJar = packaged
+                ? "mcp/prime-mcp-server-1.0.0.jar"
+                : "services/prime-mcp-server/target/prime-mcp-server-1.0.0.jar";
 
         McpServerConfig searxng = new McpServerConfig();
         searxng.setId("searxng");
@@ -161,8 +169,8 @@ public class McpServerStore {
         searxng.setBuiltin(true);
         searxng.setTransport("stdio");
         searxng.setCommand(new ArrayList<>(List.of(
-                "java", "-jar",
-                "services/searxng-mcp-server/target/searxng-mcp-server-1.0.0.jar",
+                javaCmd, "-jar",
+                searxngJar,
                 "--searxng-url", "http://localhost:8888"
         )));
         list.add(searxng);
@@ -175,8 +183,8 @@ public class McpServerStore {
         prime.setBuiltin(true);
         prime.setTransport("stdio");
         prime.setCommand(new ArrayList<>(List.of(
-                "java", "-jar",
-                "services/prime-mcp-server/target/prime-mcp-server-1.0.0.jar"
+                javaCmd, "-jar",
+                primeJar
         )));
         list.add(prime);
 

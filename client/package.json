@@ -3,18 +3,64 @@
   "version": "1.0.0",
   "description": "AI Chat Electron Client",
   "main": "electron/main.js",
+  "author": "AI-Chat",
   "scripts": {
     "dev": "electron .",
     "build": "vite build",
+    "build:mac": "vite build && electron-builder --mac dmg",
+    "build:win": "vite build && electron-builder --win nsis",
     "dev:vite": "vite",
     "dev:electron": "wait-on http://localhost:3000 && electron ."
   },
-  "dependencies": {
-    "electron": "^28.0.0"
-  },
+  "dependencies": {},
   "devDependencies": {
-    "vite": "^5.2.0",
+    "electron": "^28.0.0",
     "@vitejs/plugin-vue": "^5.0.4",
+    "autoprefixer": "^10.5.0",
+    "electron-builder": "^24.13.3",
+    "postcss": "^8.5.15",
+    "tailwindcss": "^3.4.19",
+    "vite": "^5.2.0",
     "wait-on": "^7.2.0"
+  },
+  "build": {
+    "electronDownload": {
+      "mirror": "https://npmmirror.com/mirrors/electron/"
+    },
+    "appId": "org.example.aichat",
+    "productName": "AI-Chat",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "electron/**"
+    ],
+    "extraResources": [
+      {
+        "from": "../packaging/staging/mac",
+        "to": "runtime",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../packaging/config",
+        "to": "config",
+        "filter": ["**/*"]
+      }
+    ],
+    "mac": {
+      "target": ["dmg"],
+      "category": "public.app-category.entertainment"
+    },
+    "dmg": {
+      "artifactName": "AI-Chat-${version}-mac-arm64.dmg"
+    },
+    "win": {
+      "target": ["nsis"]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }

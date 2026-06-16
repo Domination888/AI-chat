@@ -21,6 +21,32 @@ log = logging.getLogger("sensevoice-server")
 STATE = {"model": None, "device": "cpu", "loaded": False}
 
 
+def model_cache_dir() -> str:
+    for key in ("SENSEVOICE_MODEL_DIR", "FUNASR_MODEL_DIR", "MODELSCOPE_CACHE"):
+        val = os.environ.get(key)
+        if val:
+            os.makedirs(val, exist_ok=True)
+            return val
+    return ""
+
+
+def ffmpeg_cmd() -> str:
+    bundled = os.environ.get("FFMPEG_PATH")
+    if bundled and os.path.isfile(bundled):
+        return bundled
+    runtime_ffmpeg = os.path.join(os.path.dirname(__file__), "ffmpeg")
+    if os.path.isfile(runtime_ffmpeg):
+        return runtime_ffmpeg
+    try:
+        import imageio_ffmpeg
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
+        if exe and os.path.isfile(exe):
+            return exe
+    except Exception:
+        pass
+    return "ffmpeg"
+
+
 def pick_device() -> str:
     try:
         import torch
@@ -33,26 +59,29 @@ def pick_device() -> str:
 
 def load_model():
     from funasr import AutoModel
+    cache = model_cache_dir()
+    if cache:
+        os.environ.setdefault("MODELSCOPE_CACHE", cache)
+        os.environ.setdefault("FUNASR_MODEL_DIR", cache)
     device = pick_device()
-    log.info("loading SenseVoiceSmall on device=%s ...", device)
+    log.info("loading SenseVoiceSmall on device=%s cache=%s ...", device, cache or "(default)")
+    model_id = os.environ.get("SENSEVOICE_MODEL_ID", "iic/SenseVoiceSmall")
+    kwargs = dict(
+        model=model_id,
+        vad_model="fsmn-vad",
+        vad_kwargs={"max_single_segment_time": 30000},
+        device=device,
+        disable_update=True,
+    )
+    if cache:
+        kwargs["model_dir"] = cache
     try:
-        m = AutoModel(
-            model="iic/SenseVoiceSmall",
-            vad_model="fsmn-vad",
-            vad_kwargs={"max_single_segment_time": 30000},
-            device=device,
-            disable_update=True,
-        )
+        m = AutoModel(**kwargs)
     except Exception as e:
         log.warning("load on %s failed: %s, fallback to cpu", device, e)
         device = "cpu"
-        m = AutoModel(
-            model="iic/SenseVoiceSmall",
-            vad_model="fsmn-vad",
-            vad_kwargs={"max_single_segment_time": 30000},
-            device="cpu",
-            disable_update=True,
-        )
+        kwargs["device"] = "cpu"
+        m = AutoModel(**kwargs)
     STATE["model"] = m
     STATE["device"] = device
     STATE["loaded"] = True
@@ -78,7 +107,7 @@ async def healthz():
 def _ensure_16k_mono_wav(src_path: str) -> str:
     """用 ffmpeg 把任意格式转成 16k mono pcm_s16le wav。"""
     dst = src_path + ".16k.wav"
-    cmd = ["ffmpeg", "-y", "-i", src_path, "-ar", "16000", "-ac", "1",
+    cmd = [ffmpeg_cmd(), "-y", "-i", src_path, "-ar", "16000", "-ac", "1",
            "-c:a", "pcm_s16le", dst]
     r = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     if r.returncode != 0:
@@ -168,4 +197,5 @@ async def transcribe(
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server:app", host="127.0.0.1", port=9000, workers=1, reload=False)
+    port = int(os.environ.get("SENSEVOICE_PORT", "9000"))
+    uvicorn.run("server:app", host="127.0.0.1", port=port, workers=1, reload=False)

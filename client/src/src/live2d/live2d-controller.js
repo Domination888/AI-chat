@@ -2,7 +2,7 @@
  * Live2D 控制器 — 核心驱动
  *
  * 职责：
- *   1. 情绪驱动：根据映射表触发表情 + 动作
+ *   1. 情绪驱动：根据映射表触发表情 + 动作（动作音效由 motionSoundEnabled 门控）
  *   2. 口型同步：WebAudio Analyser 实时分析频率，驱动 ParamMouthOpenY
  *   3. 表情恢复：对话结束后恢复默认表情
  */
@@ -19,6 +19,21 @@ class Live2DController {
     this._lipSyncAnalyser = null
     this._lipSyncSource = null
     this._emotionResetTimer = null
+    /** 是否播放 Live2D 动作音效（仅点击模型触发的主动对话时为 true） */
+    this._motionSoundEnabled = false
+  }
+
+  /** @returns {boolean} */
+  get motionSoundEnabled() {
+    return this._motionSoundEnabled
+  }
+
+  /**
+   * 开启/关闭 Live2D 动作音效（表情、动作、口型同步不受影响）
+   * @param {boolean} enabled
+   */
+  setMotionSoundEnabled(enabled) {
+    this._motionSoundEnabled = !!enabled
   }
 
   /**
@@ -45,8 +60,9 @@ class Live2DController {
   /**
    * 触发情绪（表情 + 动作同时触发）
    * @param {string} emotion 情绪名称，如 '开心'、'生气'
+   * @param {{ withSound?: boolean }} [options] withSound=true 时播放动作音效（主动对话）
    */
-  triggerEmotion(emotion) {
+  triggerEmotion(emotion, options = {}) {
     if (!this.model) {
       console.warn('[Live2DController] no model, skip triggerEmotion:', emotion)
       return
@@ -62,8 +78,8 @@ class Live2DController {
     // 触发表情
     this.triggerExpression(mapping.expression)
 
-    // 触发动作（LLM情绪驱动时静音，避免动作音效与TTS语音冲突）
-    this.triggerMotion(mapping.motion, true)
+    // 普通对话静音；点击触发的主动对话可播放动作音效
+    this.triggerMotion(mapping.motion, !options.withSound)
 
     // 设定自动恢复计时器：3s 后恢复默认表情
     this._scheduleEmotionReset()
@@ -298,7 +314,6 @@ class Live2DController {
     setTimeout(() => {
       this.stopLipSync()
       this.resetExpression()
-      // 不恢复动作音效（已全局禁用 Live2D 动作声音，只保留动作）
     }, 2000)
   }
 }

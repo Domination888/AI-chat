@@ -67,14 +67,17 @@
           </div>
           <div class="text-sm font-medium truncate dark:text-gray-200">{{ user?.username }}</div>
         </div>
-        <div class="flex gap-2">
-          <button @click="openSettings" class="flex-1 text-xs border border-gray-300 dark:border-gray-600 rounded-md py-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition">
+        <div class="grid grid-cols-2 gap-2">
+          <button @click="openSettings" class="text-xs border border-gray-300 dark:border-gray-600 rounded-md py-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition">
             ⚙️ 设置
           </button>
-          <button @click="showExtensions = true" class="flex-1 text-xs border border-gray-300 dark:border-gray-600 rounded-md py-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition" title="管理 MCP 服务器与技能">
+          <button @click="showExtensions = true" class="text-xs border border-gray-300 dark:border-gray-600 rounded-md py-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition" title="管理 MCP 服务器与技能">
             🧩 扩展
           </button>
-          <button @click="logout" class="flex-1 text-xs text-gray-500 dark:text-gray-400 hover:text-red-500 border border-gray-300 dark:border-gray-600 rounded-md py-1.5 transition">
+          <button v-if="isElectron" @click="showLogs = true" class="text-xs border border-gray-300 dark:border-gray-600 rounded-md py-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition" title="查看系统日志">
+            📋 日志
+          </button>
+          <button @click="logout" class="text-xs text-gray-500 dark:text-gray-400 hover:text-red-500 border border-gray-300 dark:border-gray-600 rounded-md py-1.5 transition" :class="{ 'col-span-2': !isElectron }">
             退出
           </button>
         </div>
@@ -228,6 +231,12 @@
     </div>
   </div>
   
+  <SetupWizard
+    v-if="showSetupWizard"
+    :initial-settings="settings"
+    @done="onSetupComplete"
+  />
+
   <!-- 设置模态框 -->
   <McpSkillManager
     :show="showExtensions"
@@ -240,6 +249,11 @@
     @close="showSettings = false"
     @save="handleSettingsSave"
     ref="settingsModal"
+  />
+
+  <LogViewerModal
+    :show="showLogs"
+    @close="showLogs = false"
   />
   
   <!-- 角色选择器模态框 -->
@@ -262,11 +276,14 @@
 import { ref, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import SettingsModal from './components/SettingsModal.vue'
+import LogViewerModal from './components/LogViewerModal.vue'
 import McpSkillManager from './components/McpSkillManager.vue'
 import RoleCardSelector from './components/RoleCardSelector.vue'
 import Live2DCanvas from './components/Live2DCanvas.vue'
 import { live2dController } from './live2d/live2d-controller.js'
 import { DEFAULT_SETTINGS, fetchRuntimeConfig, runtimeConfigToSettings } from './utils/runtimeConfig.js'
+import { apiFetch, apiUrl, initApiBase } from './utils/api.js'
+import SetupWizard from './components/SetupWizard.vue'
 
 const inputRaw = ref('')
 const messages = ref([])
@@ -344,7 +361,10 @@ const normalizeProactiveIdleSeconds = (value) => {
 
 // 设置相关
 const showSettings = ref(false)
+const showSetupWizard = ref(false)
 const showExtensions = ref(false)
+const showLogs = ref(false)
+const isElectron = !!window.electronAPI
 const showRoleSelector = ref(false)
 const settings = ref({ ...DEFAULT_SETTINGS })
 
@@ -356,7 +376,7 @@ const doLogin = async () => {
   isLoggingIn.value = true
   loginError.value = ''
   try {
-    const res = await fetch('/api/user/login', {
+    const res = await apiFetch('/api/user/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(loginForm.value)
@@ -387,7 +407,7 @@ const logout = () => {
 
 const loadRoles = async () => {
   try {
-    const res = await fetch('/api/roles')
+    const res = await apiFetch('/api/roles')
     const data = await res.json()
     roles.value = data || []
     if (roles.value.length > 0 && !selectedRole.value) {
@@ -411,7 +431,7 @@ const onRoleChange = async () => {
 const loadConversations = async () => {
   if (!user.value || !selectedRole.value) return
   try {
-    const res = await fetch(`/api/conversation/user/${user.value.id}/role/${selectedRole.value.id}`)
+    const res = await apiFetch(`/api/conversation/user/${user.value.id}/role/${selectedRole.value.id}`)
     const data = await res.json()
     conversations.value = data || []
   } catch (e) {
@@ -424,7 +444,7 @@ const selectConversation = async (id) => {
   await unregisterProactiveChat()
   currentConversationId.value = id
   try {
-    const res = await fetch(`/api/conversation/${id}/history`)
+    const res = await apiFetch(`/api/conversation/${id}/history`)
     const data = await res.json()
     // 后端 History 字段映射: sender → role, content → content
     messages.value = (data || []).map(h => ({
@@ -454,7 +474,7 @@ const deleteConversation = async (id) => {
       cancelButtonText: '取消',
       type: 'warning'
     })
-    await fetch(`/api/conversation/${id}`, { method: 'DELETE' })
+    await apiFetch(`/api/conversation/${id}`, { method: 'DELETE' })
     conversations.value = conversations.value.filter(c => c.id !== id)
     if (currentConversationId.value === id) {
       newChat()
@@ -467,7 +487,8 @@ const deleteConversation = async (id) => {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await initApiBase()
   const savedUser = localStorage.getItem('chat_user')
   if (savedUser) {
     try {
@@ -489,7 +510,19 @@ onMounted(() => {
   // 监听 Live2D 子窗口的点击互动事件，触发主动说话
   if (window.electronAPI && window.electronAPI.onLive2dInteract) {
     window.electronAPI.onLive2dInteract(() => {
+      if (!settings.value.proactiveChatEnabled) return
+      live2dController.setMotionSoundEnabled(true)
       triggerProactiveFromInteract()
+    })
+  }
+  if (window.electronAPI?.onShowSetupWizard) {
+    window.electronAPI.onShowSetupWizard(() => {
+      showSetupWizard.value = true
+    })
+  }
+  if (window.electronAPI?.isFirstRun) {
+    window.electronAPI.isFirstRun().then((first) => {
+      if (first) showSetupWizard.value = true
     })
   }
 })
@@ -1069,7 +1102,7 @@ const abortCurrentChat = async () => {
   // 1. 通知后端打断
   if (currentConversationId.value) {
     try {
-      await fetch('/api/chat/interrupt', {
+      await apiFetch('/api/chat/interrupt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ conversationId: currentConversationId.value })
@@ -1109,7 +1142,7 @@ const reportLatency = async (session) => {
   if (!session?.traceId || session.reported) return
   session.reported = true
   try {
-    await fetch('/api/chat/latency', {
+    await apiFetch('/api/chat/latency', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1164,12 +1197,14 @@ const beginLatencySession = (requestBody) => {
  * @param aiMsgIndex AI 消息在 messages 数组中的 index
  */
 const doChatSSE = async (requestBody, userMsgIndex, aiMsgIndex) => {
+  // 用户主动发消息：保留表情/动作/口型，但不播放 Live2D 动作音效
+  live2dController.setMotionSoundEnabled(false)
   const latencySession = beginLatencySession(requestBody)
   // 创建 AbortController 支持请求级打断
   const controller = new AbortController()
   currentAbortController = controller
 
-  const response = await fetch('/api/chat', {
+  const response = await apiFetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(requestBody),
@@ -1217,7 +1252,6 @@ const doChatSSE = async (requestBody, userMsgIndex, aiMsgIndex) => {
         messages.value[userMsgIndex].content = payload.text || ''
         messages.value[userMsgIndex].isAudio = false
       } else if (evName === 'emotion') {
-        // 情绪标签事件：驱动 Live2D 表情/动作
         live2dController.triggerEmotion(payload.emotion)
       } else if (evName === 'text') {
         if (firstText && (payload.delta || '')) {
@@ -1325,6 +1359,12 @@ const openSettings = () => {
   showSettings.value = true
 }
 
+const onSetupComplete = (saved) => {
+  settings.value = { ...settings.value, ...saved }
+  showSetupWizard.value = false
+  localStorage.setItem('appSettings', JSON.stringify(settings.value))
+}
+
 /** 从 localStorage 恢复客户端缓存（后端不可用时兜底） */
 const restoreSettings = () => {
   const saved = localStorage.getItem('appSettings')
@@ -1407,16 +1447,23 @@ let proactiveEventSource = null  // SSE 长连接引用
  * 调用后端 /api/chat/proactive/trigger 接口，跳过空闲检查直接触发一次主动搭话
  */
 const triggerProactiveFromInteract = async () => {
-  if (!currentConversationId.value || !user.value) return
-  if (!settings.value.proactiveChatEnabled) return
+  if (!currentConversationId.value || !user.value) {
+    live2dController.setMotionSoundEnabled(false)
+    return
+  }
+  if (!settings.value.proactiveChatEnabled) {
+    live2dController.setMotionSoundEnabled(false)
+    return
+  }
   try {
-    await fetch('/api/chat/proactive/trigger', {
+    await apiFetch('/api/chat/proactive/trigger', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ conversationId: currentConversationId.value })
     })
   } catch (e) {
     console.warn('触发互动主动说话失败', e)
+    live2dController.setMotionSoundEnabled(false)
   }
 }
 
@@ -1431,7 +1478,7 @@ const registerProactiveChat = async () => {
 
   // 1. 调后端注册
   try {
-    await fetch('/api/chat/proactive', {
+    await apiFetch('/api/chat/proactive', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1451,7 +1498,7 @@ const registerProactiveChat = async () => {
   closeProactiveEventSource()
 
   // 3. 开启新的 SSE 长连接
-  const url = `/api/chat/proactive/stream?conversationId=${encodeURIComponent(currentConversationId.value)}`
+  const url = apiUrl(`/api/chat/proactive/stream?conversationId=${encodeURIComponent(currentConversationId.value)}`)
   proactiveEventSource = new EventSource(url)
 
   proactiveEventSource.addEventListener('proactive', (e) => {
@@ -1474,10 +1521,11 @@ const registerProactiveChat = async () => {
   })
 
   proactiveEventSource.addEventListener('emotion', (e) => {
-    // 主动搭话的情绪标签事件：驱动 Live2D 表情/动作
     let payload = {}
     try { payload = JSON.parse(e.data) } catch {}
-    live2dController.triggerEmotion(payload.emotion)
+    live2dController.triggerEmotion(payload.emotion, {
+      withSound: live2dController.motionSoundEnabled
+    })
   })
 
   proactiveEventSource.addEventListener('tts', (e) => {
@@ -1499,6 +1547,7 @@ const registerProactiveChat = async () => {
       messages.value[proactiveAiMsgIndex].content = '[已打断]'
     }
     proactiveAiMsgIndex = null
+    live2dController.setMotionSoundEnabled(false)
   })
 
   proactiveEventSource.addEventListener('error', (e) => {
@@ -1506,6 +1555,7 @@ const registerProactiveChat = async () => {
     try { payload = JSON.parse(e.data) } catch {}
     console.warn('主动搭话错误', payload.message)
     proactiveAiMsgIndex = null
+    live2dController.setMotionSoundEnabled(false)
   })
 
   proactiveEventSource.onerror = () => {
@@ -1523,7 +1573,7 @@ const unregisterProactiveChat = async () => {
   if (!currentConversationId.value) return
   closeProactiveEventSource()
   try {
-    await fetch('/api/chat/proactive', {
+    await apiFetch('/api/chat/proactive', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ conversationId: currentConversationId.value })

@@ -255,7 +255,7 @@ onMounted(async () => {
       console.warn('[Live2DOverlay] Cubism Core SDK not loaded')
     }
 
-    model = await Live2DModel.from('/live2d/shu/黍.model3.json', {
+    model = await Live2DModel.from(`${import.meta.env.BASE_URL}live2d/shu/黍.model3.json`, {
       autoInteract: false,
       autoUpdate: true,
     })
@@ -306,7 +306,12 @@ onMounted(async () => {
     if (window.live2dAPI) {
       window.live2dAPI.onAction((action, data) => {
         switch (action) {
-          case 'emotion': live2dController.triggerEmotion(data); break
+          case 'emotion': {
+            const emotion = typeof data === 'string' ? data : data?.emotion
+            const withSound = typeof data === 'object' && data?.withSound
+            live2dController.triggerEmotion(emotion, { withSound })
+            break
+          }
           case 'reset': resetExpression(); break
           case 'end': live2dController.onConversationEnd(); break
           case 'stopLipSync': live2dController.stopLipSync(); break

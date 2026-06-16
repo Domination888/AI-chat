@@ -1,0 +1,23 @@
+[ {
+  "id" : "searxng",
+  "name" : "SearXNG 联网搜索",
+  "description" : "本地 SearXNG 元搜索引擎，提供 webSearch 工具（替代智谱 Web Search）",
+  "enabled" : true,
+  "transport" : "stdio",
+  "command" : [ "java", "-jar", "services/searxng-mcp-server/target/searxng-mcp-server-1.0.0.jar", "--searxng-url", "http://localhost:8888" ],
+  "env" : { },
+  "url" : "",
+  "headers" : { },
+  "builtin" : true
+}, {
+  "id" : "prime",
+  "name" : "Prime 示例工具",
+  "description" : "示例本地 MCP 工具：isPrime 判断质数",
+  "enabled" : true,
+  "transport" : "stdio",
+  "command" : [ "java", "-jar", "services/prime-mcp-server/target/prime-mcp-server-1.0.0.jar" ],
+  "env" : { },
+  "url" : "",
+  "headers" : { },
+  "builtin" : true
+} ]

@@ -1,7 +1,9 @@
 # SenseVoice ASR 服务依赖
 fastapi>=0.68.0
 uvicorn>=0.15.0
+python-multipart>=0.0.6
 funasr>=1.0.0
 torch>=1.13.0
 torchaudio>=0.13.0
 numpy>=1.21.0
+imageio-ffmpeg>=0.5.0

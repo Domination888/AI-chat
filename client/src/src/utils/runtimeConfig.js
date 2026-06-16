@@ -1,3 +1,5 @@
+import { apiFetch } from './api.js'
+
 /** 客户端偏好默认值（与 SettingsModal / App.vue 对齐） */
 export const DEFAULT_CLIENT = {
   ttsSpeed: 1.0,
@@ -114,13 +116,13 @@ export function settingsToRuntimeConfig(settings) {
 }
 
 export async function fetchRuntimeConfig() {
-  const res = await fetch('/api/runtime-config')
+  const res = await apiFetch('/api/runtime-config')
   if (!res.ok) throw new Error(`加载配置失败: ${res.status}`)
   return res.json()
 }
 
 export async function saveRuntimeConfig(settings) {
-  const res = await fetch('/api/runtime-config', {
+  const res = await apiFetch('/api/runtime-config', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(settingsToRuntimeConfig(settings))

@@ -119,11 +119,11 @@ cd client && npx electron .
 
 ### 生产构建
 ```bash
-# 构建前端
-cd client/src && npm run build
+# 全依赖 dmg / exe（详见 docs/packaging.md）
+./scripts/package-all.sh mac
+./scripts/package-all.sh win
 
-# 构建Electron应用
+# 仅构建前端 + Electron 安装包（需先 stage-runtime）
 cd client && npm run build:mac      # macOS
-cd client && npm run build:win     # Windows
-cd client && npm run build:linux   # Linux
+cd client && npm run build:win       # Windows
 ```

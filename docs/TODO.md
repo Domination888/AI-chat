@@ -1,18 +1,25 @@
+### 整合包优化/测试：
+
+- 优化启动速度（TTS，Mac AI Chat）
+- 记忆系统测试
+- 联网搜索测试
+
 ### 短期优化：
 
 - 使用win上的gemma4重跑黍人格（需win）
-- tts迁回mac（需win）
-- 打包成全依赖的exe和dmg
+- llama.cpp和LM studio的性能对比（需win）
+- 优化全链路延迟
+- 酒馆角色卡
 
 ### 长期优化：
 
 - 拓展skill
+- TTS模型重训，实现更好的音色
 
 ### 待测试：
 
 - 打断是否生效
 - win模型的tools call（需win）
-- 主动说话间隔时间
 
 ### 项目模块：
 
@@ -24,8 +31,10 @@ Live2D控制
 记忆管理
 
 ### 已完成：
+- 全依赖 exe/dmg 打包基础设施（见 [docs/packaging.md](../docs/packaging.md)）
 - 全链路配置线上化
 - 全链路延迟日志
+- 前端日志系统
 - 前端设置不生效
 - 深色模式
 - 情绪标签控制Live2D
