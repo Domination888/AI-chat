@@ -36,56 +36,47 @@ def render_aka(persona: dict) -> str:
     return " / ".join(a for a in arr if a)
 
 
-def render_personality(persona: dict) -> str:
-    """合并 personality[] + speech_style + catchphrases[] + taboo[] + output_rules[] + relationships[]。
-    新 persona_card 已去除 catchphrases，所以下面这一节会自动跳过。"""
-    sb = []
-
-    pers = persona.get("personality") or []
-    if pers:
-        sb.append("核心性格：")
-        for p in pers:
-            if p.strip():
-                sb.append(f"- {p.strip()}")
-
-    ss = persona.get("speech_style")
-    if ss:
-        sb.append(f"说话风格：{ss.strip()}")
-
-    catchphrases = persona.get("catchphrases") or []
-    if catchphrases:
-        sb.append("口癖：")
-        for c in catchphrases:
-            if c.strip():
-                sb.append(f"- {c.strip()}")
-
-    taboo = persona.get("taboo") or []
-    if taboo:
-        sb.append("禁忌：")
-        for t in taboo:
-            if t.strip():
-                sb.append(f"- {t.strip()}")
-
-    rules = persona.get("output_rules") or []
-    if rules:
-        sb.append("输出规则：")
-        for r in rules:
-            if r.strip():
-                sb.append(f"- {r.strip()}")
-
-    rel = persona.get("relationships") or []
-    if rel:
-        sb.append("关系：")
-        for item in rel:
-            who, how = item.get("who", "").strip(), item.get("how", "").strip()
-            if who and how:
-                sb.append(f"- {who}：{how}")
-
-    return "\n".join(sb).strip()
+def append_line(out: list[str], title: str, text: str | None) -> None:
+    if text and text.strip():
+        out.append(f"{title}：{text.strip()}")
 
 
-def render_example_dialogue(persona: dict) -> str:
-    arr = persona.get("example_dialogue") or []
+def append_bullets(out: list[str], title: str, items: list[str] | None) -> None:
+    items = [i.strip() for i in (items or []) if i and i.strip()]
+    if not items:
+        return
+    out.append(f"{title}：")
+    out.extend(f"- {i}" for i in items)
+
+
+def render_persona(persona: dict) -> str:
+    card = persona.get("persona")
+    if isinstance(card, str):
+        return card.strip()
+    if isinstance(card, dict):
+        out = []
+        append_line(out, "身份", card.get("identity"))
+        append_line(out, "来历", card.get("origin"))
+        append_line(out, "外貌", card.get("appearance"))
+        append_bullets(out, "性格与日常", card.get("traits"))
+        append_line(out, "说话方式", card.get("speech"))
+        append_bullets(out, "扮演规则", card.get("rules"))
+        return "\n".join(out).strip()
+
+    return ""
+
+
+def render_relationships(persona: dict) -> str:
+    out = []
+    for item in persona.get("relationships") or []:
+        who, how = item.get("who", "").strip(), item.get("how", "").strip()
+        if who and how:
+            out.append(f"- {who}：{how}")
+    return "\n".join(out).strip()
+
+
+def render_examples(persona: dict) -> str:
+    arr = persona.get("examples") or []
     role_name = persona.get("name") or "AI"
     out = []
     for turn in arr:
@@ -110,14 +101,12 @@ def build_role_system_layer() -> tuple[str, dict]:
     persona = json.loads(PERSONA_JSON.read_text(encoding="utf-8"))
     template = ROLE_TEMPLATE.read_text(encoding="utf-8")
     vars = {
-        "name":            persona.get("name", ""),
-        "aka":             render_aka(persona),
-        "profile":         persona.get("identity", ""),
-        "background":      persona.get("background_oneliner", ""),
-        "personality":     render_personality(persona),
-        "exampleDialogue": render_example_dialogue(persona),
-        "soulInjection":   persona.get("soul_injection", ""),
-        "soulMantra":      persona.get("soul_mantra", ""),
+        "name":          persona.get("name", ""),
+        "aka":           render_aka(persona),
+        "persona":       render_persona(persona),
+        "relationships": render_relationships(persona),
+        "examples":      render_examples(persona),
+        "mantra":        persona.get("mantra", ""),
     }
     return render_template(template, vars), vars
 
@@ -350,20 +339,15 @@ def main() -> int:
     md.append("")
     md.append("---")
     md.append("")
-    md.append("## 第 5 段 · 与旧版 persona_card 的关键差异")
+    md.append("## 第 5 段 · persona_card 结构收敛")
     md.append("")
-    md.append("| 项目 | 旧版 | 新版 |")
-    md.append("|------|------|------|")
-    md.append("| 口癖 `catchphrases` 数组 | 5 句要求高频嵌入 | 已删除，避免 LLM 复读机化 |")
-    md.append("| `soul_injection` 中『自然嵌入口癖』指令 | 有 | 已删除 |")
-    md.append("| 不当条目（色情顺从等） | 有 | 已删除 |")
-    md.append("| `personality` 条数 | 8 条 | 5 条精炼版 |")
-    md.append("| `taboo` 显式禁忌 | 无 | 新增 6 条，其中明确『不冒认神农/老乡长/绩/老天师』 |")
-    md.append("| `output_rules` 显式输出规则 | 无 | 新增 6 条，含『被误认为神农时温和澄清』脚本 |")
-    md.append("| 身份认定 | 一度误把『绩/老乡长/神农』当成黍的别称 | **已修正**：这三个都是另有其人；黍只是承接了神农的事业 |")
-    md.append("| `relationships` 人物 | 5 条 | 13 条，新增『绩 / 老天师 / 神农 / 老乡长 / 沉默的樵夫』等独立角色 |")
-    md.append("| 长尾事实细节 | 全压在角色卡 | 下沉到 lore/stories 71 个场景切片，按需 RAG 检索 |")
-    md.append("| 示例对话 `example_dialogue` | 2 条 | 5 条（含『神农』澄清、『为什么活这么久』等典型应对） |")
+    md.append("| 主体 | 说明 |")
+    md.append("|------|------|")
+    md.append("| `persona` | 合并身份、来历、外貌、性格、说话方式、扮演规则；角色卡不再拆散成多组相互覆盖的字段 |")
+    md.append("| `relationships` | 只放人物关系，不再混进人格规则 |")
+    md.append("| `examples` | 对话样例，字段名和模板占位符一致 |")
+    md.append("| `mantra` | 角色层最后一句铭印 |")
+    md.append("| 兼容策略 | 没有 persona_card 时仍回退数据库字段；有 persona_card 时只认这四个主体块 |")
     md.append("")
     md.append("")
 

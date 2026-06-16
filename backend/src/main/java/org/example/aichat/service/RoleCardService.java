@@ -129,14 +129,11 @@ public class RoleCardService {
     private Map<String, String> buildVarsFromRole(RoleCard role) {
         Map<String, String> vars = new HashMap<>();
         vars.put("name", nullToEmpty(role.getName()));
-        vars.put("profile", nullToEmpty(role.getProfile()));
-        vars.put("background", nullToEmpty(role.getBackground()));
-        vars.put("personality", nullToEmpty(role.getPersonality()));
-        vars.put("exampleDialogue", nullToEmpty(role.getExampleDialogue()));
-        // 默认值（无 persona_card 时占位符给空字符串而不是 {{xxx}} 残留）
         vars.put("aka", "");
-        vars.put("soulInjection", "");
-        vars.put("soulMantra", "");
+        vars.put("persona", renderDbPersona(role));
+        vars.put("relationships", "");
+        vars.put("examples", nullToEmpty(role.getExampleDialogue()));
+        vars.put("mantra", "");
 
         if (!StringUtils.hasText(role.getPersonaCardPath())) {
             return vars;
@@ -149,32 +146,29 @@ public class RoleCardService {
             }
             JsonNode root = objectMapper.readTree(json);
 
-            // name / profile / background：persona_card 优先覆盖数据库字段
             overwriteIfText(root, "name", vars, "name");
-            overwriteIfText(root, "identity", vars, "profile");
-            overwriteIfText(root, "background_oneliner", vars, "background");
 
-            // aka 别名：渲染成 "Shu / 黍姐 / 天师姐姐" 格式
             String akaText = renderAka(root);
             if (StringUtils.hasText(akaText)) {
                 vars.put("aka", akaText);
             }
 
-            // 入魂指令 / 一句话铭印（角色专属行为细则）
-            overwriteIfText(root, "soul_injection", vars, "soulInjection");
-            overwriteIfText(root, "soul_mantra", vars, "soulMantra");
-
-            // personality：合并 personality[] + speech_style + catchphrases[] + taboo[] + output_rules[] + relationships
-            String personalityBlock = renderPersonalityBlock(root);
-            if (StringUtils.hasText(personalityBlock)) {
-                vars.put("personality", personalityBlock);
+            String personaBlock = renderPersona(root);
+            if (StringUtils.hasText(personaBlock)) {
+                vars.put("persona", personaBlock);
             }
 
-            // exampleDialogue：persona_card 里是对象数组 [{user, assistant}, ...]
-            String dialogueBlock = renderExampleDialogue(root);
+            String relationshipsBlock = renderRelationships(root);
+            if (StringUtils.hasText(relationshipsBlock)) {
+                vars.put("relationships", relationshipsBlock);
+            }
+
+            String dialogueBlock = renderExamples(root);
             if (StringUtils.hasText(dialogueBlock)) {
-                vars.put("exampleDialogue", dialogueBlock);
+                vars.put("examples", dialogueBlock);
             }
+
+            overwriteIfText(root, "mantra", vars, "mantra");
         } catch (Exception e) {
             log.warn("读取 persona_card 失败，回退数据库字段：path={}, err={}", role.getPersonaCardPath(), e.getMessage());
         }
@@ -198,36 +192,42 @@ public class RoleCardService {
     }
 
     /**
-     * 把 persona_card.json 的多个人格相关字段渲染成一段结构化文本，注入到 {{personality}} 占位符。
-     * 合并顺序（有的字段缺失就跳过）：
-     *   - personality[] 核心性格标签
-     *   - speech_style 说话风格
-     *   - catchphrases[] 口癖
-     *   - taboo[] 禁忌
-     *   - output_rules[] 输出规则
-     *   - relationships[] 关系（who/how）
+     * persona_card 只有四个主体块：
+     *   persona（身份/来历/外貌/性格/说话/规则）、relationships、examples、mantra。
+     * 这里把 persona 对象渲染成一段稳定文本，避免模板和 JSON 字段互相嵌套太深。
      */
-    private String renderPersonalityBlock(JsonNode root) {
-        StringBuilder sb = new StringBuilder();
-
-        appendArrayAsBullets(sb, root.get("personality"), "核心性格");
-        appendTextLine(sb, root.get("speech_style"), "说话风格");
-        appendArrayAsBullets(sb, root.get("catchphrases"), "口癖");
-        appendArrayAsBullets(sb, root.get("taboo"), "禁忌");
-        appendArrayAsBullets(sb, root.get("output_rules"), "输出规则");
-
-        JsonNode rel = root.get("relationships");
-        if (rel != null && rel.isArray() && !rel.isEmpty()) {
-            sb.append("关系：\n");
-            for (JsonNode item : rel) {
-                String who = item.path("who").asText("").trim();
-                String how = item.path("how").asText("").trim();
-                if (!who.isEmpty() && !how.isEmpty()) {
-                    sb.append("- ").append(who).append("：").append(how).append("\n");
-                }
-            }
+    private String renderPersona(JsonNode root) {
+        JsonNode persona = root.get("persona");
+        if (persona != null && persona.isTextual()) {
+            return persona.asText("").trim();
+        }
+        if (persona != null && persona.isObject()) {
+            StringBuilder sb = new StringBuilder();
+            appendTextLine(sb, persona.get("identity"), "身份");
+            appendTextLine(sb, persona.get("origin"), "来历");
+            appendTextLine(sb, persona.get("appearance"), "外貌");
+            appendArrayAsBullets(sb, persona.get("traits"), "性格与日常");
+            appendTextLine(sb, persona.get("speech"), "说话方式");
+            appendArrayAsBullets(sb, persona.get("rules"), "扮演规则");
+            return sb.toString().trim();
         }
 
+        return "";
+    }
+
+    private String renderRelationships(JsonNode root) {
+        JsonNode rel = root.get("relationships");
+        if (rel == null || !rel.isArray() || rel.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (JsonNode item : rel) {
+            String who = item.path("who").asText("").trim();
+            String how = item.path("how").asText("").trim();
+            if (!who.isEmpty() && !how.isEmpty()) {
+                sb.append("- ").append(who).append("：").append(how).append("\n");
+            }
+        }
         return sb.toString().trim();
     }
 
@@ -251,10 +251,10 @@ public class RoleCardService {
     }
 
     /**
-     * 渲染 example_dialogue 数组为 "User: ...\n{name}: ..." 形式的多轮样例。
+     * 渲染 examples 数组为 "User: ...\n{name}: ..." 形式的多轮样例。
      */
-    private String renderExampleDialogue(JsonNode root) {
-        JsonNode arr = root.get("example_dialogue");
+    private String renderExamples(JsonNode root) {
+        JsonNode arr = root.get("examples");
         if (arr == null || !arr.isArray() || arr.isEmpty()) {
             return "";
         }
@@ -269,6 +269,20 @@ public class RoleCardService {
             sb.append("\n");
         }
         return sb.toString().trim();
+    }
+
+    private String renderDbPersona(RoleCard role) {
+        StringBuilder sb = new StringBuilder();
+        appendPlainLine(sb, role.getProfile(), "身份");
+        appendPlainLine(sb, role.getBackground(), "来历");
+        appendPlainLine(sb, role.getPersonality(), "性格与规则");
+        return sb.toString().trim();
+    }
+
+    private void appendPlainLine(StringBuilder sb, String text, String title) {
+        if (StringUtils.hasText(text)) {
+            sb.append(title).append("：").append(text.trim()).append("\n");
+        }
     }
 
     /**
