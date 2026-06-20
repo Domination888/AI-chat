@@ -6,11 +6,16 @@
 
 ### 短期优化：
 
-- 使用win上的gemma4重跑黍人格（需win）
-- llama.cpp和LM studio的性能对比（需win）
+- 黍人格优化
+  - 使用win上的gemma4重跑黍人格（需win）
+  - 酒馆角色卡
 - 优化全链路延迟
-- 酒馆角色卡
 - 指令跟随太差了（需win）
+- 整合plans，memory，rules，doc
+- packaging里有什么？
+- scripts太多了
+- backend/src/main/resources/personas/shu/lore和data/raw中的数据重复？
+- llama.cpp和LM studio的对比测试
 
 ### 长期优化：
 
