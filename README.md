@@ -1,129 +1,109 @@
-# AI 对话项目（二次元角色扮演）- Electron 客户端版
+# AI-Chat
 
-把游戏剧情与角色台词搬进现实，选择角色卡，开口就能聊。现在支持桌面客户端！
+AI-Chat 是一个本地优先的二次元角色对话桌面应用：Electron + Vue3 负责界面和 Live2D，Spring Boot 负责编排 LLM、RAG、Memos 长期记忆、ASR、TTS 和 MCP 工具。
 
-## 技术栈
+## 当前技术栈
 
-- 客户端：Electron + Vue3 + Vite + Element Plus
-- 后端：Spring Boot 3 + LangChain4j + MyBatis
-- LLM：本地 LM Studio（OpenAI 兼容协议）
-- ASR：本地 SenseVoice
-- TTS: 本地 GPT-SoVITS
-- 存储：MySQL（角色卡、会话、历史、长期记忆）+ Redis（短期记忆）
-- RAG：LangChain4j EmbeddingStore（角色台词与剧情向量化）
-
-## 新的目录结构
-
-```
-AI-Chat/
-├── backend/                    # Spring Boot后端
-│   ├── src/
-│   ├── pom.xml
-│   └── ...
-├── client/                     # Electron客户端应用
-│   ├── electron/               # Electron主进程代码
-│   ├── src/                    # Vue3前端代码
-│   ├── package.json            # Electron应用配置
-│   └── ...
-├── services/                   # 独立服务
-│   ├── gpt-sovits/             # GPT-SoVITS服务
-│   ├── sense-voice/            # SenseVoice ASR服务
-│   └── prime-mcp-server/       # MCP工具服务
-├── docs/                       # 项目文档
-└── scripts/                    # 部署和构建脚本
-```
-
-## 快速开始
-
-### 1. 准备依赖
-
-| 组件 | 版本/说明 |
+| 模块 | 当前实现 |
 | --- | --- |
-| JDK | 17+ |
-| Maven | 用 `mvnw` 即可 |
-| Node | 18+ |
-| MySQL | 8.x，账号密码见 [`backend/src/main/resources/application-local.yml`](backend/src/main/resources/application-local.yml) |
-| Redis | 6+，本机 6379 |
-| LM Studio | 启动一个 chat 模型 + 一个 embedding 模型（默认端口 1234） |
-| SenseVoice | 见 [`services/sense-voice/api.py`](services/sense-voice/api.py) |
+| 桌面端 | Electron 28 + Vue3 + Vite + Element Plus |
+| 后端 | Spring Boot 3.5 + LangChain4j + MyBatis |
+| LLM | OpenAI 兼容接口，默认通过运行时配置指向 LM Studio |
+| ASR | 本地 SenseVoice，默认 `http://127.0.0.1:9000` |
+| TTS | Astra/Genie-TTS，默认 `astra` 策略 |
+| 记忆 | Memos 长期记忆 + Redis RAG fallback |
+| 存储 | MySQL + Redis |
+| 工具 | LangChain4j MCP，本地 SearXNG 搜索与 Prime 示例工具 |
+| 打包 | electron-builder + `packaging/stage-runtime.sh` |
 
-### 2. 初始化数据库
+## 目录结构
+
+```text
+AI-Chat/
+├── backend/                 # Spring Boot 后端
+├── client/                  # Electron 主进程 + 打包配置
+├── client/src/              # Vue3 前端源码
+├── config/                  # 本机运行时配置、MCP 配置、本机服务参数
+├── docs/                    # 当前项目文档
+├── packaging/               # 全依赖安装包的缓存、模板、staging 脚本
+├── scripts/                 # 构建、打包、数据库辅助脚本
+├── services/                # SenseVoice、SearXNG MCP、Prime MCP 等服务
+├── startup-scripts/         # 开发环境一键启动/停止脚本
+└── unified-logs/            # 开发期统一日志
+```
+
+`MemOS/` 和 `my-neuro/` 是外部/参考工程，不作为 AI-Chat 主源码文档维护对象。
+
+## 开发启动
+
+前置依赖：
+
+- JDK 17+
+- Node 18+
+- Python 3.10+
+- MySQL 8.x 与 Redis 6+
+- Docker（可选；开发期 SearXNG 使用 Docker）
+- 可用的 LLM / Embedding / TTS OpenAI 兼容或 HTTP 服务
+
+初始化数据库：
 
 ```bash
-# 推荐：项目脚本（不依赖 mysql 是否在 PATH）
 ./scripts/local-db.sh mysql < backend/init.sql
-
-# 或直连（需 ~/.zshrc 已配置 MySQL PATH）
-mysql -uroot -p < backend/init.sql
 ```
 
-本机 MySQL / Redis 连接说明见 [`AGENTS.md`](AGENTS.md) 与 [`config/local-services.env`](config/local-services.env)。
-
-### 3. 一键启动开发环境
+启动完整开发环境：
 
 ```bash
-# 启动完整的开发环境（后端 + 前端 + Electron）
-./run-dev.sh
-
-# 或者使用脚本（推荐）
-./scripts/start-dev.sh
+./startup-scripts/start-all.sh
 ```
 
-### 4. 手动启动（可选）
-
-如果需要手动控制各个组件：
+停止：
 
 ```bash
-# 1. 启动后端
-cd backend && ./mvnw spring-boot:run
-
-# 2. 启动前端开发服务器
-cd client/src && npm run dev
-
-# 3. 启动Electron客户端
-cd client && npx electron .
+./startup-scripts/stop-all.sh
 ```
 
-### 5. 停止服务
+开发期默认地址：
+
+| 服务 | 地址 |
+| --- | --- |
+| 前端 Vite | `http://localhost:3000` |
+| 后端健康检查 | `http://localhost:8080/api/health` |
+| ASR | `http://localhost:9000/healthz` |
+| SearXNG | `http://localhost:8888` |
+| MemOS | `http://localhost:8000` |
+
+日志在 `unified-logs/` 下。
+
+脚本入口说明见 `docs/scripts.md`。开发期不再维护按模块启动脚本，默认直接启动完整环境。
+
+## 核心 API
+
+- `POST /api/chat`：统一 SSE 聊天入口，支持文本/语音、RAG、MCP tools、联网搜索、TTS chunk。
+- `POST /api/chat/interrupt`：打断当前会话生成和 TTS 播放。
+- `POST /api/chat/proactive`：注册主动搭话。
+- `GET /api/chat/proactive/stream`：主动搭话 SSE 流。
+- `POST /api/audio/asr`：独立 ASR。
+- `GET /api/audio/tts`：独立 TTS。
+- `GET /api/rag/reload`：手动重建 RAG。
+- `GET/PUT /api/runtime-config`：读取和保存运行时配置。
+- `GET/PUT/POST/DELETE /api/roles`：角色卡管理。
+
+## 构建与打包
+
+构建后端、前端和 MCP JAR：
 
 ```bash
-./stop-dev.sh
+./scripts/build-all.sh
 ```
 
-## 开发指南
+全依赖桌面安装包：
 
-### Electron客户端开发
-
-客户端使用Electron + Vue3技术栈：
-
-1. **主进程代码**：`client/electron/main.js`
-2. **渲染进程代码**：`client/src/`（Vue3应用）
-3. **IPC通信**：通过`client/electron/preload.js`暴露API
-
-### 后端API
-
-后端提供RESTful API，客户端通过HTTP请求与后端通信。主要端点：
-
-- `GET /api/health` - 健康检查
-- `POST /api/chat` - 聊天接口
-- `GET /api/characters` - 获取角色列表
-- `POST /api/asr` - 语音识别
-- `POST /api/tts` - 文本转语音
-
-## 构建和部署
-
-### 开发环境
 ```bash
-./run-dev.sh
-```
-
-### 生产构建
-```bash
-# 全依赖 dmg / exe（详见 docs/packaging.md）
 ./scripts/package-all.sh mac
 ./scripts/package-all.sh win
-
-# 仅构建前端 + Electron 安装包（需先 stage-runtime）
-cd client && npm run build:mac      # macOS
-cd client && npm run build:win       # Windows
 ```
+
+打包版内置 Electron、后端 JAR、JRE、ASR、MySQL、Redis、MemOS、SearXNG、MCP JAR；LLM、Embedding、TTS 仍由用户在首次启动向导或设置页填写 URL。
+
+更多细节见 `docs/packaging.md` 和 `docs/scripts.md`。

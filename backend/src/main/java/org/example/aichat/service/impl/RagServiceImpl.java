@@ -282,9 +282,10 @@ public class RagServiceImpl implements RagService {
             // 全局知识库（兼容历史 rag/ 目录，仅顶层 txt/md，作为可选项保留）
             org.springframework.core.io.Resource[] globalTxt = resolver.getResources("classpath*:rag/*.txt");
             org.springframework.core.io.Resource[] globalMd = resolver.getResources("classpath*:rag/*.md");
-            // 角色目录新结构：personas/{roleCode}/lore/*.md|*.txt + personas/{roleCode}/memory_cards.jsonl
-            org.springframework.core.io.Resource[] roleTxt = resolver.getResources("classpath*:personas/*/lore/*.txt");
-            org.springframework.core.io.Resource[] roleMd = resolver.getResources("classpath*:personas/*/lore/*.md");
+            // 角色目录新结构：personas/{roleCode}/lore/**/*.md|*.txt + personas/{roleCode}/memory_cards.jsonl
+            // lore 下面允许再按 stories/、profile/ 等子目录组织；递归扫描保证剧情切片真正进入 RAG。
+            org.springframework.core.io.Resource[] roleTxt = resolver.getResources("classpath*:personas/*/lore/**/*.txt");
+            org.springframework.core.io.Resource[] roleMd = resolver.getResources("classpath*:personas/*/lore/**/*.md");
             org.springframework.core.io.Resource[] roleJsonl = resolver.getResources("classpath*:personas/*/memory_cards.jsonl");
 
             List<org.springframework.core.io.Resource> textResources = new ArrayList<>();

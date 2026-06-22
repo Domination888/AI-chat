@@ -1,58 +1,26 @@
-### 整合包优化/测试：
+# TODO
 
-- 优化启动速度（TTS，Mac AI Chat）
-- 记忆系统测试
-- 联网搜索测试
+本文件只记录当前仍有意义的待办。已完成的历史任务不再保留在这里。
 
-### 短期优化：
+## 高优先级
 
-- 黍人格优化
-  - 使用win上的gemma4重跑黍人格（需win）
-  - 酒馆角色卡
-- 优化全链路延迟
-- 指令跟随太差了（需win）
-- 整合plans，memory，rules，doc
-- packaging里有什么？
-- scripts太多了
-- backend/src/main/resources/personas/shu/lore和data/raw中的数据重复？
-- llama.cpp和LM studio的对比测试
+- 记忆系统回归：Memos 写入只包含 user 消息，检索结果正确注入 prompt，Memos 不可用时 fallback 到 Redis RAG。
+- 联网搜索回归：开发期 Docker SearXNG、打包版 SearXNG、SearXNG MCP 工具调用三段都要测。
+- 全链路延迟排查：LLM 首 token、TTS 首包、ASR 耗时、RAG/Memos 查询耗时分别看 `unified-logs/backend/latency.log`。
 
-### 长期优化：
+## 中期优化
 
-- 拓展skill
-- TTS模型重训，实现更好的音色
+- 黍人格继续打磨：角色卡、memory_cards、lore 去重和质量回归。
+- 检查 `backend/src/main/resources/personas/shu/lore` 与历史 raw 数据是否重复。
+- 打包后性能测试
 
-### 待测试：
+## 长期方向
 
-- 打断是否生效
-- win模型的tools call（需win）
+- 拓展 Skill / MCP 工具体系。
+- 训练或替换更适合角色对话的 TTS 音色。
+- 优化kv cache
 
-### 项目模块：
+## 回归清单
 
-TTS
-ASR
-Live2D控制
-主动对话
-人格组成
-记忆管理
-
-### 已完成：
-- 全依赖 exe/dmg 打包基础设施（见 [docs/packaging.md](../docs/packaging.md)）
-- 全链路配置线上化
-- 全链路延迟日志
-- 前端日志系统
-- 前端设置不生效
-- 深色模式
-- 情绪标签控制Live2D
-- 表情重置不对（5.22，codex5.2轻松解决GLM5.1的问题）
-- AstraTTS mac改版
-- 表字段优化
-- 分角色记忆
-
-### 难点：
-
-- tts选型
-- 角色记忆
-- 角色prompt构造，使LLM扮演的像一点
-- 在扮演的像的同时，保证工具调用的顺利
-
+- 用户在 AI 回复/TTS 播放时发送新消息，旧回复和音频应被打断。
+- 主动搭话开关、空闲时间、提示词保存后应立即生效。
