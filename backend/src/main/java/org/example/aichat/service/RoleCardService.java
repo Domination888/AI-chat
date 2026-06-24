@@ -134,6 +134,11 @@ public class RoleCardService {
         vars.put("relationships", "");
         vars.put("examples", nullToEmpty(role.getExampleDialogue()));
         vars.put("mantra", "");
+        vars.put("intimacy_profile", "");
+        vars.put("sister_profiles", "");
+        vars.put("wardrobe", "");
+        vars.put("dragon_bubble", "");
+        vars.put("nsfw", "");
 
         if (!StringUtils.hasText(role.getPersonaCardPath())) {
             return vars;
@@ -169,6 +174,17 @@ public class RoleCardService {
             }
 
             overwriteIfText(root, "mantra", vars, "mantra");
+
+            overwriteIfText(root, "intimacy_profile", vars, "intimacy_profile");
+
+            overwriteIfText(root, "sister_profiles", vars, "sister_profiles");
+            overwriteIfText(root, "wardrobe", vars, "wardrobe");
+            overwriteIfText(root, "dragon_bubble", vars, "dragon_bubble");
+
+            String nsfwBlock = renderNsfw(root);
+            if (StringUtils.hasText(nsfwBlock)) {
+                vars.put("nsfw", nsfwBlock);
+            }
         } catch (Exception e) {
             log.warn("读取 persona_card 失败，回退数据库字段：path={}, err={}", role.getPersonaCardPath(), e.getMessage());
         }
@@ -192,8 +208,9 @@ public class RoleCardService {
     }
 
     /**
-     * persona_card 只有四个主体块：
-     *   persona（身份/来历/外貌/性格/说话/规则）、relationships、examples、mantra。
+     * persona_card 主体块：
+     *   persona、relationships、examples、mantra，以及可选的 intimacy_profile、
+     *   sister_profiles、wardrobe、dragon_bubble、nsfw（来自酒馆卡蒸馏）。
      * 这里把 persona 对象渲染成一段稳定文本，避免模板和 JSON 字段互相嵌套太深。
      */
     private String renderPersona(JsonNode root) {
@@ -213,6 +230,28 @@ public class RoleCardService {
         }
 
         return "";
+    }
+
+    private String renderNsfw(JsonNode root) {
+        JsonNode nsfw = root.get("nsfw");
+        if (nsfw == null || !nsfw.isObject()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        appendTextLine(sb, nsfw.get("profile"), "档案");
+        appendTextLine(sb, nsfw.get("dialogue_full"), "完整语料");
+        appendArrayAsBullets(sb, nsfw.get("rules"), "演绎规则");
+        JsonNode samples = nsfw.get("dialogue_samples");
+        if (samples != null && samples.isArray() && !samples.isEmpty()) {
+            sb.append("台词参考（可化用，勿整段照搬）：\n");
+            for (JsonNode item : samples) {
+                String text = item.asText("").trim();
+                if (!text.isEmpty()) {
+                    sb.append("- ").append(text).append("\n");
+                }
+            }
+        }
+        return sb.toString().trim();
     }
 
     private String renderRelationships(JsonNode root) {

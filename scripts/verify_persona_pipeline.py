@@ -90,6 +90,25 @@ def render_examples(persona: dict) -> str:
     return "\n".join(out).strip()
 
 
+def render_nsfw(persona: dict) -> str:
+    nsfw = persona.get("nsfw")
+    if not isinstance(nsfw, dict):
+        return ""
+    out = []
+    profile = (nsfw.get("profile") or "").strip()
+    if profile:
+        out.append(f"档案：{profile}")
+    dialogue_full = (nsfw.get("dialogue_full") or "").strip()
+    if dialogue_full:
+        out.append(f"完整语料：{dialogue_full}")
+    append_bullets(out, "演绎规则", nsfw.get("rules"))
+    samples = [s.strip() for s in (nsfw.get("dialogue_samples") or []) if s and s.strip()]
+    if samples:
+        out.append("语料气质参考：")
+        out.extend(f"- {s}" for s in samples)
+    return "\n".join(out).strip()
+
+
 def render_template(template: str, vars: dict[str, str]) -> str:
     out = template
     for k, v in vars.items():
@@ -105,7 +124,12 @@ def build_role_system_layer() -> tuple[str, dict]:
         "aka":           render_aka(persona),
         "persona":       render_persona(persona),
         "relationships": render_relationships(persona),
+        "intimacy_profile": (persona.get("intimacy_profile") or "").strip(),
+        "sister_profiles": (persona.get("sister_profiles") or "").strip(),
+        "wardrobe": (persona.get("wardrobe") or "").strip(),
+        "dragon_bubble": (persona.get("dragon_bubble") or "").strip(),
         "examples":      render_examples(persona),
+        "nsfw":          render_nsfw(persona),
         "mantra":        persona.get("mantra", ""),
     }
     return render_template(template, vars), vars
