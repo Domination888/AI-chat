@@ -15,6 +15,21 @@
         <div class="border dark:border-gray-700 rounded-lg p-3">
           <h4 class="font-semibold dark:text-gray-100 mb-3">LLM 模型</h4>
           <div class="grid grid-cols-1 gap-3">
+            <div v-if="form.recentLlmModels.length" class="space-y-2">
+              <div class="text-sm font-medium text-gray-700 dark:text-gray-300">最近使用</div>
+              <div class="grid grid-cols-1 gap-2">
+                <button
+                  v-for="model in form.recentLlmModels"
+                  :key="`${model.modelName}-${model.baseUrl}`"
+                  type="button"
+                  @click="selectRecentLlmModel(model)"
+                  class="w-full min-w-0 rounded-md border border-gray-200 dark:border-gray-700 px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition"
+                >
+                  <div class="truncate text-sm font-medium text-gray-800 dark:text-gray-100">{{ model.modelName }}</div>
+                  <div class="truncate text-xs text-gray-500 dark:text-gray-400">{{ model.baseUrl }}</div>
+                </button>
+              </div>
+            </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Base URL</label>
               <input v-model="form.modelBaseUrl" type="text" placeholder="http://127.0.0.1:1234/v1"
@@ -234,6 +249,7 @@ import { ElMessage } from 'element-plus'
 import {
   DEFAULT_SETTINGS,
   fetchRuntimeConfig,
+  rememberRecentLlmModel,
   runtimeConfigToSettings,
   saveRuntimeConfig
 } from '../utils/runtimeConfig.js'
@@ -270,6 +286,12 @@ const formatProactiveIdle = (seconds) => {
 
 let darkModeSnapshot = false
 
+const selectRecentLlmModel = (model) => {
+  form.modelBaseUrl = model.baseUrl
+  form.modelName = model.modelName
+  form.llmStreamingModelName = model.streamingModelName || model.modelName
+}
+
 const applyForm = (settings) => {
   Object.assign(form, { ...DEFAULT_SETTINGS, ...settings })
   form.proactiveIdleSeconds = normalizeProactiveIdleSeconds(form.proactiveIdleSeconds)
@@ -305,6 +327,7 @@ watch(() => form.darkMode, (isDark) => {
 
 const saveSettings = async () => {
   form.proactiveIdleSeconds = normalizeProactiveIdleSeconds(form.proactiveIdleSeconds)
+  form.recentLlmModels = rememberRecentLlmModel(form, form.recentLlmModels)
   saving.value = true
   try {
     const saved = await saveRuntimeConfig({ ...form })

@@ -511,7 +511,6 @@ onMounted(async () => {
   if (window.electronAPI && window.electronAPI.onLive2dInteract) {
     window.electronAPI.onLive2dInteract(() => {
       if (!settings.value.proactiveChatEnabled) return
-      live2dController.setMotionSoundEnabled(true)
       triggerProactiveFromInteract()
     })
   }
@@ -1523,9 +1522,7 @@ const registerProactiveChat = async () => {
   proactiveEventSource.addEventListener('emotion', (e) => {
     let payload = {}
     try { payload = JSON.parse(e.data) } catch {}
-    live2dController.triggerEmotion(payload.emotion, {
-      withSound: live2dController.motionSoundEnabled
-    })
+    live2dController.triggerEmotion(payload.emotion)
   })
 
   proactiveEventSource.addEventListener('tts', (e) => {

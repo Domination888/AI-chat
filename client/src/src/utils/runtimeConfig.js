@@ -32,7 +32,48 @@ export const DEFAULT_SETTINGS = {
   memosBaseUrl: '',
   memosSearchTopK: 10,
   memosSearchMode: 'mixture',
+  recentLlmModels: [],
   ...DEFAULT_CLIENT
+}
+
+const RECENT_LLM_MODELS_LIMIT = 5
+
+const normalizeRecentLlmModel = (settings) => {
+  const baseUrl = settings?.modelBaseUrl?.trim()
+    || settings?.baseUrl?.trim()
+  const modelName = settings?.modelName?.trim()
+  const streamingModelName = settings?.llmStreamingModelName?.trim()
+    || settings?.streamingModelName?.trim()
+    || modelName
+  if (!baseUrl || !modelName) return null
+  return { modelName, baseUrl, streamingModelName }
+}
+
+export function normalizeRecentLlmModels(models = []) {
+  if (!Array.isArray(models)) return []
+
+  const seen = new Set()
+  return models
+    .map(normalizeRecentLlmModel)
+    .filter(Boolean)
+    .filter((item) => {
+      const key = `${item.modelName}\n${item.baseUrl}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .slice(0, RECENT_LLM_MODELS_LIMIT)
+}
+
+export function rememberRecentLlmModel(settings, recent = []) {
+  const entry = normalizeRecentLlmModel(settings)
+  const normalizedRecent = normalizeRecentLlmModels(recent)
+  if (!entry) return normalizedRecent
+
+  return [
+    entry,
+    ...normalizedRecent.filter((item) => item.modelName !== entry.modelName || item.baseUrl !== entry.baseUrl)
+  ].slice(0, RECENT_LLM_MODELS_LIMIT)
 }
 
 /** GET /api/runtime-config → 扁平 settings */
@@ -69,7 +110,8 @@ export function runtimeConfigToSettings(config) {
     darkMode: client.darkMode === true,
     proactiveChatEnabled: client.proactiveChatEnabled !== false,
     proactiveIdleSeconds: client.proactiveIdleSeconds ?? 3600,
-    proactivePrompt: client.proactivePrompt || DEFAULT_CLIENT.proactivePrompt
+    proactivePrompt: client.proactivePrompt || DEFAULT_CLIENT.proactivePrompt,
+    recentLlmModels: normalizeRecentLlmModels(client.recentLlmModels)
   }
 }
 
@@ -110,7 +152,8 @@ export function settingsToRuntimeConfig(settings) {
       darkMode: settings.darkMode ?? null,
       proactiveChatEnabled: settings.proactiveChatEnabled ?? null,
       proactiveIdleSeconds: settings.proactiveIdleSeconds ?? null,
-      proactivePrompt: settings.proactivePrompt || null
+      proactivePrompt: settings.proactivePrompt || null,
+      recentLlmModels: normalizeRecentLlmModels(settings.recentLlmModels)
     }
   }
 }

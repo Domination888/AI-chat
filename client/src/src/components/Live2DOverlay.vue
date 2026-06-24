@@ -47,6 +47,7 @@ import * as PIXI from 'pixi.js'
 import { Live2DModel, config } from 'pixi-live2d-display-lipsyncpatch/cubism4'
 
 window.PIXI = PIXI
+config.sound = false
 
 const canvasRef = ref(null)
 const showPanel = ref(false)
@@ -308,8 +309,7 @@ onMounted(async () => {
         switch (action) {
           case 'emotion': {
             const emotion = typeof data === 'string' ? data : data?.emotion
-            const withSound = typeof data === 'object' && data?.withSound
-            live2dController.triggerEmotion(emotion, { withSound })
+            live2dController.triggerEmotion(emotion)
             break
           }
           case 'reset': resetExpression(); break

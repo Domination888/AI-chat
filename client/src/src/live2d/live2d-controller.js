@@ -2,7 +2,7 @@
  * Live2D 控制器 — 核心驱动
  *
  * 职责：
- *   1. 情绪驱动：根据映射表触发表情 + 动作（动作音效由 motionSoundEnabled 门控）
+ *   1. 情绪驱动：根据映射表触发表情 + 动作（动作音效始终静音）
  *   2. 口型同步：WebAudio Analyser 实时分析频率，驱动 ParamMouthOpenY
  *   3. 表情恢复：对话结束后恢复默认表情
  */
@@ -19,7 +19,7 @@ class Live2DController {
     this._lipSyncAnalyser = null
     this._lipSyncSource = null
     this._emotionResetTimer = null
-    /** 是否播放 Live2D 动作音效（仅点击模型触发的主动对话时为 true） */
+    /** 保留兼容旧调用；Live2D 表情/动作音效始终禁用 */
     this._motionSoundEnabled = false
   }
 
@@ -29,11 +29,12 @@ class Live2DController {
   }
 
   /**
-   * 开启/关闭 Live2D 动作音效（表情、动作、口型同步不受影响）
+   * 兼容旧调用：Live2D 表情/动作音效始终禁用（表情、动作、口型同步不受影响）
    * @param {boolean} enabled
    */
-  setMotionSoundEnabled(enabled) {
-    this._motionSoundEnabled = !!enabled
+  setMotionSoundEnabled(_enabled) {
+    this._motionSoundEnabled = false
+    config.sound = false
   }
 
   /**
@@ -60,9 +61,9 @@ class Live2DController {
   /**
    * 触发情绪（表情 + 动作同时触发）
    * @param {string} emotion 情绪名称，如 '开心'、'生气'
-   * @param {{ withSound?: boolean }} [options] withSound=true 时播放动作音效（主动对话）
+   * @param {object} [_options] 兼容旧调用；Live2D 动作音效始终静音
    */
-  triggerEmotion(emotion, options = {}) {
+  triggerEmotion(emotion, _options = {}) {
     if (!this.model) {
       console.warn('[Live2DController] no model, skip triggerEmotion:', emotion)
       return
@@ -78,8 +79,8 @@ class Live2DController {
     // 触发表情
     this.triggerExpression(mapping.expression)
 
-    // 普通对话静音；点击触发的主动对话可播放动作音效
-    this.triggerMotion(mapping.motion, !options.withSound)
+    // 表情/动作触发始终静音，避免与 TTS 或系统音频重叠
+    this.triggerMotion(mapping.motion, true)
 
     // 设定自动恢复计时器：3s 后恢复默认表情
     this._scheduleEmotionReset()
@@ -106,26 +107,17 @@ class Live2DController {
   /**
    * 触发动作
    * @param {{group: string, index: number}} motionConfig
-   * @param {boolean} [muteSound=false] 是否静音（LLM调用时应静音，避免和TTS冲突）
-   *
-   * 注意：muteSound=true 时不恢复 config.sound，因为 model.motion() 内部是异步
-   * 加载/播放声音的，finally 中立即恢复会导致声音在恢复后才播放出来。
-   * config.sound 会在以下时机恢复：
-   *   - 用户手动点击模型触发动作时（Live2DOverlay.playMotion 设置 config.sound = true）
-   *   - 对话结束时 onConversationEnd() 恢复
+   * @param {boolean} [_muteSound=true] 兼容旧调用；Live2D 动作音效始终静音
    */
-  triggerMotion(motionConfig, muteSound = false) {
+  triggerMotion(motionConfig, _muteSound = true) {
     if (!this.model || !motionConfig) return
     try {
-      if (muteSound) {
-        config.sound = false
-      }
+      config.sound = false
       this.model.motion(motionConfig.group, motionConfig.index)
-      console.log('[Live2DController] motion:', motionConfig.group, motionConfig.index, muteSound ? '(muted)' : '')
+      console.log('[Live2DController] motion:', motionConfig.group, motionConfig.index, '(muted)')
     } catch (e) {
       console.warn('[Live2DController] motion failed:', motionConfig, e)
     }
-    // 不再在 finally 中恢复 config.sound，避免异步声音泄漏
   }
 
   /**

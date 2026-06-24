@@ -2,6 +2,8 @@ package org.example.aichat.config;
 
 import lombok.Data;
 
+import java.util.List;
+
 /**
  * 全链路运行时配置 DTO，对应 config/runtime-config.json。
  * 各 section 字段为 null 表示「不修改 / 使用 yml 或当前值」。
@@ -63,5 +65,13 @@ public class RuntimeConfig {
         private Boolean proactiveChatEnabled;
         private Integer proactiveIdleSeconds;
         private String proactivePrompt;
+        private List<RecentLlmModel> recentLlmModels;
+    }
+
+    @Data
+    public static class RecentLlmModel {
+        private String modelName;
+        private String baseUrl;
+        private String streamingModelName;
     }
 }

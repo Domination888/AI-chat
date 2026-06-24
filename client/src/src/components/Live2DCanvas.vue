@@ -18,14 +18,14 @@ import { live2dController } from '../live2d/live2d-controller.js'
 // 覆写 live2dController 的方法，使其通过 IPC 转发到子窗口
 const isElectron = !!window.electronAPI
 
-live2dController.triggerEmotion = (emotion, options) => {
+live2dController.triggerEmotion = (emotion) => {
   if (isElectron) {
-    window.electronAPI.live2dControl('emotion', { emotion, ...options })
+    window.electronAPI.live2dControl('emotion', { emotion })
   }
 }
 
-live2dController.setMotionSoundEnabled = (enabled) => {
-  live2dController._motionSoundEnabled = !!enabled
+live2dController.setMotionSoundEnabled = () => {
+  live2dController._motionSoundEnabled = false
 }
 
 live2dController.resetExpression = () => {

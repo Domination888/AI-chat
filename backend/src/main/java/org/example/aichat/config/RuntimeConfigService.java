@@ -260,5 +260,6 @@ public class RuntimeConfigService {
         if (patch.getProactiveChatEnabled() != null) base.setProactiveChatEnabled(patch.getProactiveChatEnabled());
         if (patch.getProactiveIdleSeconds() != null) base.setProactiveIdleSeconds(patch.getProactiveIdleSeconds());
         if (patch.getProactivePrompt() != null) base.setProactivePrompt(patch.getProactivePrompt());
+        if (patch.getRecentLlmModels() != null) base.setRecentLlmModels(patch.getRecentLlmModels());
     }
 }

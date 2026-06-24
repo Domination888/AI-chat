@@ -43,7 +43,7 @@
 
 <script setup>
 import { reactive, ref } from 'vue'
-import { saveRuntimeConfig, runtimeConfigToSettings } from '../utils/runtimeConfig.js'
+import { rememberRecentLlmModel, saveRuntimeConfig } from '../utils/runtimeConfig.js'
 
 const props = defineProps({
   initialSettings: { type: Object, required: true },
@@ -76,6 +76,7 @@ async function save() {
       embeddingModelName: form.embeddingModelName.trim(),
       astraTtsBaseUrl: form.ttsBaseUrl.trim(),
     }
+    merged.recentLlmModels = rememberRecentLlmModel(merged, merged.recentLlmModels)
     const saved = await saveRuntimeConfig(merged)
     if (window.electronAPI?.completeSetup) {
       await window.electronAPI.completeSetup()
