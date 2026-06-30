@@ -65,6 +65,17 @@ public class MemosClient {
     public record MemoryItem(String id, String text, MemoryType type, double relativity) {}
 
     /**
+     * 前端管理用记忆项。
+     * id 用于精确删除；text 是可读内容；type/sessionId/cubeId 用于展示和过滤。
+     */
+    public record ManagedMemoryItem(String id,
+                                    String text,
+                                    MemoryType type,
+                                    String sessionId,
+                                    String cubeId,
+                                    double relativity) {}
+
+    /**
      * Memos 搜索结果 —— 按类型分组
      */
     public record SearchResult(List<MemoryItem> userMemories,
@@ -233,6 +244,60 @@ public class MemosClient {
         return submitAdd(body, userId, roleId, effectiveSessionId, "user_message");
     }
 
+    /**
+     * 添加一轮完整对话记忆。相比只写用户消息，这更接近 MemOS chat handler 的
+     * query + answer 写回路径，能让 MemReader 抽取“角色与用户之间发生过什么”。
+     */
+    public boolean addConversationTurn(String userId, String sessionId, Integer roleId,
+                                       String userMsg, String assistantMsg,
+                                       List<Map<String, String>> chatHistory) {
+        if (!isEnabled() || !StringUtils.hasText(userId) || !StringUtils.hasText(userMsg)) {
+            return false;
+        }
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("user_id", userId);
+        String effectiveSessionId = resolveSessionId(roleId, sessionId);
+        if (StringUtils.hasText(effectiveSessionId)) {
+            body.put("session_id", effectiveSessionId);
+        }
+        body.put("async_mode", props.getAsyncMode());
+        if ("sync".equalsIgnoreCase(props.getAsyncMode())) {
+            body.put("mode", "fine");
+        }
+
+        List<Map<String, String>> messages = new ArrayList<>();
+        messages.add(message("user", userMsg));
+        if (props.isSaveAssistantTurns() && StringUtils.hasText(assistantMsg)) {
+            messages.add(message("assistant", assistantMsg));
+        }
+        body.put("messages", messages);
+
+        if (chatHistory != null && !chatHistory.isEmpty()) {
+            body.put("chat_history", trimHistory(chatHistory, props.getSearchHistoryMessages()));
+        }
+
+        List<String> writableCubeIds = resolveWritableCubeIds(roleId);
+        if (!writableCubeIds.isEmpty()) {
+            body.put("writable_cube_ids", writableCubeIds);
+        }
+
+        body.put("custom_tags", List.of("conversation_turn", roleTag(roleId)));
+
+        Map<String, Object> info = new LinkedHashMap<>();
+        info.put("source", "ai-chat");
+        info.put("memory_type", props.isSaveAssistantTurns() ? "conversation_turn" : "user_fact");
+        if (roleId != null) {
+            info.put("role_id", roleId);
+        }
+        if (StringUtils.hasText(sessionId)) {
+            info.put("conversation_id", sessionId);
+        }
+        body.put("info", info);
+
+        return submitAdd(body, userId, roleId, effectiveSessionId, "conversation_turn");
+    }
+
     // ======================== Search Memory ========================
 
     /**
@@ -246,7 +311,7 @@ public class MemosClient {
      * @return 匹配的记忆文本列表
      */
     public List<String> searchMemories(String userId, String sessionId, Integer roleId, String query, Integer topK) {
-        SearchResult result = searchStructured(userId, sessionId, roleId, query, topK);
+        SearchResult result = searchStructured(userId, sessionId, roleId, query, topK, List.of());
         if (result.isEmpty()) return List.of();
         // 旧接口兼容：合并所有记忆为单一文本列表（已不推荐使用，请走 searchStructured）
         List<String> texts = new ArrayList<>(result.total());
@@ -264,6 +329,11 @@ public class MemosClient {
      * pref_mem（偏好记忆）单独成一组。
      */
     public SearchResult searchStructured(String userId, String sessionId, Integer roleId, String query, Integer topK) {
+        return searchStructured(userId, sessionId, roleId, query, topK, List.of());
+    }
+
+    public SearchResult searchStructured(String userId, String sessionId, Integer roleId, String query,
+                                         Integer topK, List<Map<String, String>> chatHistory) {
         if (!isEnabled() || !StringUtils.hasText(userId) || !StringUtils.hasText(query)) {
             return SearchResult.empty();
         }
@@ -277,8 +347,17 @@ public class MemosClient {
         body.put("top_k", fetchLimit);
         body.put("mode", props.getSearchMode());
         body.put("relativity", props.getRelativity());
+        body.put("dedup", StringUtils.hasText(props.getDedup()) ? props.getDedup() : "mmr");
         body.put("include_preference", props.isIncludePreference());
         body.put("pref_top_k", props.getPrefTopK());
+        body.put("search_tool_memory", props.isSearchToolMemory());
+        body.put("tool_mem_top_k", props.getToolMemTopK());
+        body.put("include_skill_memory", props.isIncludeSkillMemory());
+        body.put("skill_mem_top_k", props.getSkillMemTopK());
+
+        if (chatHistory != null && !chatHistory.isEmpty()) {
+            body.put("chat_history", trimHistory(chatHistory, props.getSearchHistoryMessages()));
+        }
 
         // 官方文档：session_id 仅作相关性加权，非硬过滤；硬过滤在 parse 阶段按 metadata.session_id 完成
         String searchSessionId = roleSessionId != null ? roleSessionId : sessionId;
@@ -352,6 +431,42 @@ public class MemosClient {
         return resp != null;
     }
 
+    public boolean feedbackManaged(String userId, Integer roleId, String feedbackContent,
+                                   String memoryId, List<Map<String, String>> history) {
+        if (!isEnabled() || !StringUtils.hasText(userId) || !StringUtils.hasText(feedbackContent)) {
+            return false;
+        }
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("user_id", userId);
+        body.put("feedback_content", feedbackContent);
+        body.put("async_mode", props.getAsyncMode());
+        String sessionId = roleId != null ? roleSessionId(roleId) : null;
+        if (StringUtils.hasText(sessionId)) {
+            body.put("session_id", sessionId);
+        }
+        if (StringUtils.hasText(memoryId)) {
+            body.put("retrieved_memory_ids", List.of(memoryId));
+        }
+        if (history != null && !history.isEmpty()) {
+            body.put("history", trimHistory(history, props.getSearchHistoryMessages()));
+        }
+
+        List<String> writableCubeIds = resolveWritableCubeIds(roleId);
+        if (!writableCubeIds.isEmpty()) {
+            body.put("writable_cube_ids", writableCubeIds);
+        }
+
+        String resp = post("/product/feedback", body);
+        boolean ok = isMemosSuccess(resp);
+        if (ok) {
+            log.info("MemOS feedback managed success: roleId={}, memoryId={}", roleId, memoryId);
+        } else {
+            log.warn("MemOS feedback managed failed: roleId={}, memoryId={}, response={}", roleId, memoryId, resp);
+        }
+        return ok;
+    }
+
     // ======================== Delete Memory ========================
 
     /**
@@ -388,6 +503,62 @@ public class MemosClient {
             log.info("MemOS delete memories success");
         }
         return resp != null;
+    }
+
+    /**
+     * 列出当前用户、当前角色可管理的文本记忆。
+     * 读取 Memos /product/get_all 后做本侧归一化：
+     * - id: 删除所需的 memory id
+     * - text: memory/content/text 等可读字段
+     * - type: metadata.memory_type
+     * - sessionId: metadata.session_id，用于角色硬过滤
+     */
+    public List<ManagedMemoryItem> listManagedMemories(String userId, Integer roleId) {
+        if (!isEnabled() || !StringUtils.hasText(userId)) {
+            return List.of();
+        }
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("user_id", userId);
+        body.put("memory_type", "text_mem");
+
+        List<String> readableCubeIds = resolveReadableCubeIds(roleId);
+        if (!readableCubeIds.isEmpty()) {
+            body.put("mem_cube_ids", readableCubeIds);
+        }
+
+        String resp = post("/product/get_all", body);
+        if (!StringUtils.hasText(resp)) {
+            return List.of();
+        }
+        return parseManagedMemories(resp, roleId);
+    }
+
+    /**
+     * 删除当前角色作用域内的记忆。删除 API 使用 writable_cube_ids 做物理隔离。
+     */
+    public boolean deleteManagedMemories(List<String> memoryIds, String userId, Integer roleId) {
+        if (!isEnabled() || memoryIds == null || memoryIds.isEmpty()) {
+            return false;
+        }
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("memory_ids", memoryIds);
+
+        List<String> writableCubeIds = resolveWritableCubeIds(roleId);
+        if (!writableCubeIds.isEmpty()) {
+            body.put("writable_cube_ids", writableCubeIds);
+        }
+
+        String resp = post("/product/delete_memory", body);
+        boolean ok = isMemosSuccess(resp);
+        if (ok) {
+            log.info("MemOS managed delete success: count={}, roleId={}", memoryIds.size(), roleId);
+        } else {
+            log.warn("MemOS managed delete failed: count={}, roleId={}, response={}",
+                    memoryIds.size(), roleId, resp);
+        }
+        return ok;
     }
 
     // ======================== Health Check ========================
@@ -509,6 +680,22 @@ public class MemosClient {
         return "";
     }
 
+    private Map<String, String> message(String role, String content) {
+        Map<String, String> msg = new LinkedHashMap<>();
+        msg.put("role", role);
+        msg.put("content", content == null ? "" : content);
+        return msg;
+    }
+
+    private List<Map<String, String>> trimHistory(List<Map<String, String>> history, int maxMessages) {
+        if (history == null || history.isEmpty()) {
+            return List.of();
+        }
+        int limit = maxMessages > 0 ? maxMessages : 12;
+        int from = Math.max(0, history.size() - limit);
+        return new ArrayList<>(history.subList(from, history.size()));
+    }
+
     // ======================== Internal ========================
 
     private String post(String path, Map<String, Object> body) {
@@ -529,6 +716,21 @@ public class MemosClient {
         } catch (RestClientException e) {
             log.warn("MemOS call error: path={}, message={}", path, e.getMessage());
             return null;
+        }
+    }
+
+    private boolean isMemosSuccess(String resp) {
+        if (!StringUtils.hasText(resp)) {
+            return false;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(resp);
+            int code = root.path("code").asInt(200);
+            String status = root.path("data").path("status").asText("success");
+            return code == 200 && !"failure".equalsIgnoreCase(status);
+        } catch (Exception e) {
+            log.warn("MemOS response parse failed: {}", e.getMessage());
+            return false;
         }
     }
 
@@ -590,6 +792,9 @@ public class MemosClient {
                 prefMems.add(normalized);
             });
 
+            collectFromGroup(data.path("tool_mem"), roleId, others::add);
+            collectFromGroup(data.path("skill_mem"), roleId, others::add);
+
             // 截断到 topK（按比例分配，避免某一类全占满）
             return new SearchResult(
                     capList(sortByRelativity(userMems), topK),
@@ -635,6 +840,94 @@ public class MemosClient {
         double relativity = metadata.path("relativity").asDouble(0.0);
 
         return new MemoryItem(id, text, MemoryType.from(typeRaw), relativity);
+    }
+
+    private List<ManagedMemoryItem> parseManagedMemories(String body, Integer roleId) {
+        try {
+            JsonNode root = objectMapper.readTree(body);
+            JsonNode data = root.path("data");
+            if (data.isMissingNode() || data.isNull()) {
+                return List.of();
+            }
+            Map<String, ManagedMemoryItem> dedup = new LinkedHashMap<>();
+            collectManagedRecursive(data, roleId, null, dedup);
+            return dedup.values().stream()
+                    .sorted((a, b) -> {
+                        int byType = a.type().name().compareTo(b.type().name());
+                        if (byType != 0) return byType;
+                        return a.text().compareToIgnoreCase(b.text());
+                    })
+                    .toList();
+        } catch (Exception e) {
+            log.warn("MemOS get_all parse failed: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    private void collectManagedRecursive(JsonNode node, Integer roleId, String cubeId,
+                                         Map<String, ManagedMemoryItem> out) {
+        if (node == null || node.isNull()) return;
+        if (node.isArray()) {
+            for (JsonNode child : node) {
+                collectManagedRecursive(child, roleId, cubeId, out);
+            }
+            return;
+        }
+        if (!node.isObject()) return;
+
+        String currentCubeId = cubeId;
+        JsonNode cubeNode = node.get("cube_id");
+        if (cubeNode != null && cubeNode.isTextual()) {
+            currentCubeId = cubeNode.asText();
+        }
+
+        ManagedMemoryItem item = parseManagedMemoryItem(node, roleId, currentCubeId);
+        if (item != null) {
+            out.putIfAbsent(item.id(), item);
+        }
+
+        Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> field = fields.next();
+            collectManagedRecursive(field.getValue(), roleId, currentCubeId, out);
+        }
+    }
+
+    private ManagedMemoryItem parseManagedMemoryItem(JsonNode node, Integer roleId, String cubeId) {
+        JsonNode idNode = node.get("id");
+        if (idNode == null || !idNode.isTextual() || !StringUtils.hasText(idNode.asText())) {
+            return null;
+        }
+        if ("root".equalsIgnoreCase(idNode.asText())) {
+            return null;
+        }
+        String text = pickTextField(node);
+        if (!StringUtils.hasText(text)) {
+            return null;
+        }
+
+        JsonNode metadata = node.path("metadata");
+        if (!metadata.isObject()) {
+            return null;
+        }
+        if (roleId != null) {
+            String memoryType = metadata.path("memory_type").asText("");
+            if (!StringUtils.hasText(memoryType) || !matchesRoleSession(metadata, roleId)) {
+                return null;
+            }
+        }
+
+        String typeRaw = metadata.path("memory_type").asText(null);
+        double relativity = metadata.path("relativity").asDouble(0.0);
+        String sessionId = metadata.path("session_id").asText("");
+        return new ManagedMemoryItem(
+                idNode.asText(),
+                normalize(text),
+                MemoryType.from(typeRaw),
+                sessionId,
+                cubeId == null ? "" : cubeId,
+                relativity
+        );
     }
 
     /**

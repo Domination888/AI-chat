@@ -105,6 +105,12 @@ public class RuntimeConfigService {
         memos.setSearchTopK(memosProperties.getSearchTopK());
         memos.setSearchMode(memosProperties.getSearchMode());
         memos.setRelativity(memosProperties.getRelativity());
+        memos.setIncludePreference(memosProperties.isIncludePreference());
+        memos.setPrefTopK(memosProperties.getPrefTopK());
+        memos.setDedup(memosProperties.getDedup());
+        memos.setSearchToolMemory(memosProperties.isSearchToolMemory());
+        memos.setIncludeSkillMemory(memosProperties.isIncludeSkillMemory());
+        memos.setSaveAssistantTurns(memosProperties.isSaveAssistantTurns());
         memos.setFallbackToRag(memosProperties.isFallbackToRag());
         cfg.setMemos(memos);
 
@@ -174,6 +180,12 @@ public class RuntimeConfigService {
         if (s.getSearchTopK() != null) memosProperties.setSearchTopK(s.getSearchTopK());
         if (StringUtils.hasText(s.getSearchMode())) memosProperties.setSearchMode(s.getSearchMode().trim());
         if (s.getRelativity() != null) memosProperties.setRelativity(s.getRelativity());
+        if (s.getIncludePreference() != null) memosProperties.setIncludePreference(s.getIncludePreference());
+        if (s.getPrefTopK() != null) memosProperties.setPrefTopK(s.getPrefTopK());
+        if (StringUtils.hasText(s.getDedup())) memosProperties.setDedup(s.getDedup().trim());
+        if (s.getSearchToolMemory() != null) memosProperties.setSearchToolMemory(s.getSearchToolMemory());
+        if (s.getIncludeSkillMemory() != null) memosProperties.setIncludeSkillMemory(s.getIncludeSkillMemory());
+        if (s.getSaveAssistantTurns() != null) memosProperties.setSaveAssistantTurns(s.getSaveAssistantTurns());
         if (s.getFallbackToRag() != null) memosProperties.setFallbackToRag(s.getFallbackToRag());
     }
 
@@ -249,6 +261,12 @@ public class RuntimeConfigService {
         if (patch.getSearchTopK() != null) base.setSearchTopK(patch.getSearchTopK());
         if (patch.getSearchMode() != null) base.setSearchMode(patch.getSearchMode());
         if (patch.getRelativity() != null) base.setRelativity(patch.getRelativity());
+        if (patch.getIncludePreference() != null) base.setIncludePreference(patch.getIncludePreference());
+        if (patch.getPrefTopK() != null) base.setPrefTopK(patch.getPrefTopK());
+        if (patch.getDedup() != null) base.setDedup(patch.getDedup());
+        if (patch.getSearchToolMemory() != null) base.setSearchToolMemory(patch.getSearchToolMemory());
+        if (patch.getIncludeSkillMemory() != null) base.setIncludeSkillMemory(patch.getIncludeSkillMemory());
+        if (patch.getSaveAssistantTurns() != null) base.setSaveAssistantTurns(patch.getSaveAssistantTurns());
         if (patch.getFallbackToRag() != null) base.setFallbackToRag(patch.getFallbackToRag());
     }
 

@@ -32,6 +32,13 @@ export const DEFAULT_SETTINGS = {
   memosBaseUrl: '',
   memosSearchTopK: 10,
   memosSearchMode: 'mixture',
+  memosRelativity: 0.4,
+  memosIncludePreference: true,
+  memosPrefTopK: 6,
+  memosDedup: 'mmr',
+  memosSearchToolMemory: true,
+  memosIncludeSkillMemory: true,
+  memosSaveAssistantTurns: true,
   recentLlmModels: [],
   ...DEFAULT_CLIENT
 }
@@ -104,6 +111,13 @@ export function runtimeConfigToSettings(config) {
     memosBaseUrl: memos.baseUrl || '',
     memosSearchTopK: memos.searchTopK ?? 10,
     memosSearchMode: memos.searchMode || 'mixture',
+    memosRelativity: memos.relativity ?? 0.4,
+    memosIncludePreference: memos.includePreference !== false,
+    memosPrefTopK: memos.prefTopK ?? 6,
+    memosDedup: memos.dedup || 'mmr',
+    memosSearchToolMemory: memos.searchToolMemory !== false,
+    memosIncludeSkillMemory: memos.includeSkillMemory !== false,
+    memosSaveAssistantTurns: memos.saveAssistantTurns !== false,
     ttsSpeed: client.ttsSpeed ?? 1.0,
     ttsPitch: client.ttsPitch ?? 1.0,
     autoPlayTts: client.autoPlayTts !== false,
@@ -143,7 +157,14 @@ export function settingsToRuntimeConfig(settings) {
       enabled: settings.memosEnabled ?? null,
       baseUrl: settings.memosBaseUrl?.trim() || null,
       searchTopK: settings.memosSearchTopK ?? null,
-      searchMode: settings.memosSearchMode || null
+      searchMode: settings.memosSearchMode || null,
+      relativity: settings.memosRelativity ?? null,
+      includePreference: settings.memosIncludePreference ?? null,
+      prefTopK: settings.memosPrefTopK ?? null,
+      dedup: settings.memosDedup || null,
+      searchToolMemory: settings.memosSearchToolMemory ?? null,
+      includeSkillMemory: settings.memosIncludeSkillMemory ?? null,
+      saveAssistantTurns: settings.memosSaveAssistantTurns ?? null
     },
     client: {
       ttsSpeed: settings.ttsSpeed ?? null,

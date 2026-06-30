@@ -36,6 +36,20 @@ public class MemosProperties {
     private boolean includePreference = true;
     /** 偏好记忆 top_k */
     private int prefTopK = 6;
+    /** Memos 搜索去重策略：no / sim / mmr */
+    private String dedup = "mmr";
+    /** 是否搜索工具记忆 */
+    private boolean searchToolMemory = true;
+    /** 工具记忆 top_k */
+    private int toolMemTopK = 6;
+    /** 是否搜索技能记忆 */
+    private boolean includeSkillMemory = true;
+    /** 技能记忆 top_k */
+    private int skillMemTopK = 3;
+    /** 搜索时透传给 MemOS 的最近历史条数 */
+    private int searchHistoryMessages = 12;
+    /** 写入 MemOS 时是否保存本轮 assistant 回复，使记忆更接近 MemOS chat 的 query+answer 写回 */
+    private boolean saveAssistantTurns = true;
     /**
      * 多角色隔离时是否包含 session_id=default_session 的旧记忆。
      * 默认 false：只读当前角色 role_{id} 桶内记忆。

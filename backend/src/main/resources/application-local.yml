@@ -27,7 +27,7 @@ memos:
   base-url: http://localhost:8000
   api-key: ""
   connect-timeout-ms: 3000
-  read-timeout-ms: 30000
+  read-timeout-ms: 120000
   # 固定的 Memos user_id（UUID 格式）—— 纯个人项目，所有对话共享同一用户
   user-id: "8736b16e-1d20-4163-980b-a5063c3facdc"
   # 搜索 top_k：Memos 默认 10，比旧值 3 大以利用 Memos 的去重和排序
@@ -46,6 +46,15 @@ memos:
   # 是否包含用户偏好记忆
   include-preference: true
   pref-top-k: 6
+  # Memos 搜索去重策略：mmr 更适合多条角色记忆，避免相似事实重复占满上下文
+  dedup: mmr
+  search-tool-memory: true
+  tool-mem-top-k: 6
+  include-skill-memory: true
+  skill-mem-top-k: 3
+  search-history-messages: 12
+  # 接近 Memos chat 的 query+answer 写回；如发现 assistant 话术污染用户事实，可在前端关闭
+  save-assistant-turns: true
   fallback-to-rag: true
 
 rag:

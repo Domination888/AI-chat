@@ -28,7 +28,7 @@ memos:
   base-url: ${AI_CHAT_MEMOS_URL:http://127.0.0.1:8000}
   api-key: ""
   connect-timeout-ms: 3000
-  read-timeout-ms: 30000
+  read-timeout-ms: 120000
   user-id: "8736b16e-1d20-4163-980b-a5063c3facdc"
   search-top-k: 10
   async-mode: sync
@@ -39,6 +39,13 @@ memos:
   relativity: 0.4
   include-preference: true
   pref-top-k: 6
+  dedup: mmr
+  search-tool-memory: true
+  tool-mem-top-k: 6
+  include-skill-memory: true
+  skill-mem-top-k: 3
+  search-history-messages: 12
+  save-assistant-turns: true
   fallback-to-rag: true
 
 rag:

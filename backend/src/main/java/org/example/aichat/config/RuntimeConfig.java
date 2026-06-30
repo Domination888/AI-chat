@@ -53,6 +53,12 @@ public class RuntimeConfig {
         private Integer searchTopK;
         private String searchMode;
         private Double relativity;
+        private Boolean includePreference;
+        private Integer prefTopK;
+        private String dedup;
+        private Boolean searchToolMemory;
+        private Boolean includeSkillMemory;
+        private Boolean saveAssistantTurns;
         private Boolean fallbackToRag;
     }
 

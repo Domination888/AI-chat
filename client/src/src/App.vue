@@ -246,6 +246,7 @@
   <SettingsModal 
     :show="showSettings"
     :initial-settings="settings"
+    :current-role-id="selectedRole?.id || null"
     @close="showSettings = false"
     @save="handleSettingsSave"
     ref="settingsModal"

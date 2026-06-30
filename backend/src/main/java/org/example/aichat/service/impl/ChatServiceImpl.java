@@ -26,6 +26,7 @@ import org.example.aichat.mcp.McpClientManager;
 import org.example.aichat.skill.SkillRuntimeService;
 import org.example.aichat.skill.SkillService;
 import org.example.aichat.service.memos.MemosClient;
+import org.example.aichat.service.memos.MemosWriteQueueService;
 import org.example.aichat.mapper.ConversationMapper;
 import org.example.aichat.dto.Conversation;
 import org.example.aichat.config.LlmProperties;
@@ -35,7 +36,9 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @Slf4j
@@ -49,6 +52,8 @@ public class ChatServiceImpl implements ChatService {
     private PromptService promptService;
     @Resource
     private MemosClient memosClient;
+    @Resource
+    private MemosWriteQueueService memosWriteQueueService;
     @Resource
     private RagService ragService;
     @Resource
@@ -151,11 +156,19 @@ public class ChatServiceImpl implements ChatService {
         }
         sysPrompt.append("下面开始与用户对话。\n");
 
-        // 2️⃣ 加载长期记忆（Memos 结构化分段注入）
+        // 2️⃣ 创建 ChatMemory —— 自动从 history 表加载历史消息；后续搜索和 prompt 注入都复用同一段历史
+        ChatMemory chatMemory = MessageWindowChatMemory.builder()
+                .id(conversationId)
+                .maxMessages(MAX_MEMORY_MESSAGES)
+                .chatMemoryStore(chatMemoryStore)
+                .build();
+        List<Map<String, String>> memosChatHistory = toMemosHistory(chatMemory.messages(), MAX_MEMORY_MESSAGES);
+
+        // 3️⃣ 加载长期记忆（Memos 结构化分段注入）
         if (request.getMessage() != null) {
             String memosUserId = memosProperties.getEffectiveUserId();
             MemosClient.SearchResult memResult = memosClient.searchStructured(
-                    memosUserId, null, roleId, request.getMessage(), memosClient.defaultSearchTopK());
+                    memosUserId, null, roleId, request.getMessage(), memosClient.defaultSearchTopK(), memosChatHistory);
 
             if (!memResult.isEmpty()) {
                 // 用户事实记忆（UserMemory）—— 关于"用户是谁/喜欢什么"的事实
@@ -193,15 +206,6 @@ public class ChatServiceImpl implements ChatService {
             }
         }
         if (trace != null) trace.mark("context_memos");
-
-        // 旧的 MySQL memory.summary 注入已移除
-
-        // 3️⃣ 创建 ChatMemory —— 自动从 history 表加载历史消息
-        ChatMemory chatMemory = MessageWindowChatMemory.builder()
-                .id(conversationId)
-                .maxMessages(MAX_MEMORY_MESSAGES)
-                .chatMemoryStore(chatMemoryStore)
-                .build();
 
         // 4️⃣ 构建用户消息
         String textToSave = (request.getMessage() != null && !request.getMessage().trim().isEmpty())
@@ -295,7 +299,7 @@ public class ChatServiceImpl implements ChatService {
             AtomicBoolean llmFirstToken = new AtomicBoolean(false);
             doStreamToolLoop(finalMessages, localToolSpecs, chatMemory, conversationId,
                     finalUserId, finalRoleId, sink, new StringBuilder(), 1, finalCurrentStreamingChatModel,
-                    request.getMessage(), finalTrace, llmFirstToken);
+                    request.getMessage(), memosChatHistory, finalTrace, llmFirstToken);
         });
     }
 
@@ -310,6 +314,7 @@ public class ChatServiceImpl implements ChatService {
                                   int round,
                                   StreamingChatModel currentStreamingChatModel,
                                   String originalUserMessage,
+                                  List<Map<String, String>> memosChatHistory,
                                   LatencyTrace trace,
                                   AtomicBoolean llmFirstToken) {
 
@@ -373,13 +378,17 @@ public class ChatServiceImpl implements ChatService {
                     if (trace != null) trace.mark("tool_round_" + round + "_done");
                     doStreamToolLoop(messages, toolSpecs, chatMemory, conversationId,
                             userId, roleId, sink, fullResponse, round + 1, currentStreamingChatModel, originalUserMessage,
-                            trace, llmFirstToken);
+                            memosChatHistory, trace, llmFirstToken);
                 } else if (!cancelled && fullResponse.length() > 0) {
                     String normalized = normalizeEmotionTags(fullResponse.toString());
                     chatMemory.add(AiMessage.from(normalized));
-                    pushUserMessageToMemos(conversationId, userId, roleId, originalUserMessage);
+                    sink.complete();
+                    enqueueConversationTurnToMemos(conversationId, userId, roleId, originalUserMessage, normalized, memosChatHistory);
+                    return;
                 } else if (cancelled) {
-                    pushUserMessageToMemos(conversationId, userId, roleId, originalUserMessage);
+                    sink.complete();
+                    enqueueConversationTurnToMemos(conversationId, userId, roleId, originalUserMessage, null, memosChatHistory);
+                    return;
                 }
                 sink.complete();
             }
@@ -404,20 +413,67 @@ public class ChatServiceImpl implements ChatService {
         return 1;
     }
 
-    private void pushUserMessageToMemos(String conversationId, Integer userId, Integer roleId, String userMsg) {
-        if (!memosClient.isEnabled() || userId == null || roleId == null
-                || userMsg == null || userMsg.isBlank()) {
-            return;
+    private void enqueueConversationTurnToMemos(String conversationId, Integer userId, Integer roleId,
+                                                String userMsg, String assistantMsg,
+                                                List<Map<String, String>> memosChatHistory) {
+        memosWriteQueueService.enqueueConversationTurn(
+                conversationId, userId, roleId, userMsg, assistantMsg, memosChatHistory);
+    }
+
+    private List<Map<String, String>> toMemosHistory(List<ChatMessage> messages, int maxMessages) {
+        if (messages == null || messages.isEmpty()) {
+            return List.of();
         }
-        String memosUserId = memosProperties.getEffectiveUserId();
-        try {
-            boolean ok = memosClient.addUserMessage(memosUserId, conversationId, roleId, userMsg.trim());
-            if (!ok) {
-                log.warn("MemOS 写入用户记忆未确认成功 conversationId={}, roleId={}", conversationId, roleId);
+        int from = Math.max(0, messages.size() - Math.max(maxMessages, 1));
+        List<Map<String, String>> out = new ArrayList<>();
+        for (ChatMessage msg : messages.subList(from, messages.size())) {
+            Map<String, String> item = toMemosMessage(msg);
+            if (item != null) {
+                out.add(item);
             }
-        } catch (Exception e) {
-            log.warn("推入 Memos 用户记忆失败 conversationId={}, roleId={}", conversationId, roleId, e);
         }
+        return out;
+    }
+
+    private Map<String, String> toMemosMessage(ChatMessage msg) {
+        if (msg == null) {
+            return null;
+        }
+        String role;
+        if (msg instanceof UserMessage) {
+            role = "user";
+            try {
+                String content = ((UserMessage) msg).singleText();
+                return memosMessage(role, content);
+            } catch (Exception e) {
+                return null;
+            }
+        } else if (msg instanceof AiMessage) {
+            role = "assistant";
+            return memosMessage(role, ((AiMessage) msg).text());
+        } else if (msg instanceof ToolExecutionResultMessage) {
+            role = "tool";
+        } else {
+            return null;
+        }
+        String content = msg.toString();
+        if (content == null || content.isBlank()) {
+            return null;
+        }
+        Map<String, String> item = new LinkedHashMap<>();
+        item.put("role", role);
+        item.put("content", content);
+        return item;
+    }
+
+    private Map<String, String> memosMessage(String role, String content) {
+        if (content == null || content.isBlank()) {
+            return null;
+        }
+        Map<String, String> item = new LinkedHashMap<>();
+        item.put("role", role);
+        item.put("content", content);
+        return item;
     }
 
     private void injectPreSearch(java.util.Optional<SkillRuntimeService.PreInjection> pre, List<ChatMessage> allMessages) {

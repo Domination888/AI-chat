@@ -173,6 +173,96 @@
                 </select>
               </div>
             </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">相关性阈值</label>
+                <input v-model.number="form.memosRelativity" type="number" min="0" max="1" step="0.05"
+                  class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-md text-sm" />
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">去重策略</label>
+                <select v-model="form.memosDedup" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-md text-sm">
+                  <option value="mmr">mmr</option>
+                  <option value="sim">sim</option>
+                  <option value="no">no</option>
+                </select>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <label class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                <input v-model="form.memosIncludePreference" type="checkbox" class="rounded border-gray-300" />
+                偏好记忆
+              </label>
+              <label class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                <input v-model="form.memosSaveAssistantTurns" type="checkbox" class="rounded border-gray-300" />
+                保存助手回复
+              </label>
+              <label class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                <input v-model="form.memosSearchToolMemory" type="checkbox" class="rounded border-gray-300" />
+                工具记忆
+              </label>
+              <label class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                <input v-model="form.memosIncludeSkillMemory" type="checkbox" class="rounded border-gray-300" />
+                技能记忆
+              </label>
+            </div>
+            <div class="border-t dark:border-gray-700 pt-3">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">已保存记忆</span>
+                <button
+                  type="button"
+                  @click="loadMemories"
+                  :disabled="memoryLoading || !form.memosEnabled"
+                  class="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 dark:text-gray-300 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition disabled:opacity-50"
+                >
+                  {{ memoryLoading ? '刷新中...' : '刷新' }}
+                </button>
+              </div>
+              <div v-if="memoryError" class="text-xs text-red-500 dark:text-red-400 mb-2">{{ memoryError }}</div>
+              <div v-if="!form.memosEnabled" class="text-xs text-gray-500 dark:text-gray-400">Memos 未启用</div>
+              <div v-else-if="!memoryLoading && memories.length === 0" class="text-xs text-gray-500 dark:text-gray-400">暂无可显示记忆</div>
+              <div v-else class="space-y-2 max-h-56 overflow-y-auto pr-1">
+                <div
+                  v-for="memory in memories"
+                  :key="memory.id"
+                  class="rounded-md border border-gray-200 dark:border-gray-700 p-2 bg-gray-50 dark:bg-gray-900/30"
+                >
+                  <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                      <div class="text-sm text-gray-800 dark:text-gray-100 break-words">{{ memory.text }}</div>
+                      <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                        {{ formatMemoryType(memory.type) }}
+                        <span v-if="memory.sessionId"> · {{ memory.sessionId }}</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      @click="deleteMemory(memory)"
+                      :disabled="memoryDeletingId === memory.id"
+                      class="shrink-0 px-2 py-1 text-xs text-red-600 border border-red-200 rounded-md hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/40 transition disabled:opacity-50"
+                    >
+                      {{ memoryDeletingId === memory.id ? '删除中' : '删除' }}
+                    </button>
+                  </div>
+                  <div class="mt-2 flex gap-2">
+                    <input
+                      v-model="memoryFeedback[memory.id]"
+                      type="text"
+                      placeholder="修正这条记忆..."
+                      class="min-w-0 flex-1 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-md"
+                    />
+                    <button
+                      type="button"
+                      @click="feedbackMemory(memory)"
+                      :disabled="memoryFeedbackId === memory.id || !memoryFeedback[memory.id]"
+                      class="shrink-0 px-2 py-1 text-xs text-blue-600 border border-blue-200 rounded-md hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-950/40 transition disabled:opacity-50"
+                    >
+                      {{ memoryFeedbackId === memory.id ? '提交中' : '纠错' }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -253,16 +343,24 @@ import {
   runtimeConfigToSettings,
   saveRuntimeConfig
 } from '../utils/runtimeConfig.js'
+import { apiFetch } from '../utils/api.js'
 
 const props = defineProps({
   show: { type: Boolean, default: false },
-  initialSettings: { type: Object, default: () => ({}) }
+  initialSettings: { type: Object, default: () => ({}) },
+  currentRoleId: { type: [Number, String], default: null }
 })
 
 const emit = defineEmits(['close', 'save'])
 
 const form = reactive({ ...DEFAULT_SETTINGS })
 const saving = ref(false)
+const memories = ref([])
+const memoryLoading = ref(false)
+const memoryDeletingId = ref('')
+const memoryFeedbackId = ref('')
+const memoryError = ref('')
+const memoryFeedback = reactive({})
 
 const PROACTIVE_IDLE_STEP = 1800
 const PROACTIVE_IDLE_DEFAULT = 3600
@@ -308,7 +406,98 @@ const loadSettings = async () => {
   darkModeSnapshot = form.darkMode
 }
 
-onMounted(() => loadSettings())
+const memoryTypeLabels = {
+  USER: '用户事实',
+  LONG_TERM: '长期记忆',
+  WORKING: '工作记忆',
+  PREFERENCE: '偏好记忆',
+  UNKNOWN: '未知类型'
+}
+
+const formatMemoryType = (type) => memoryTypeLabels[type] || type || '未知类型'
+
+const memoryQuery = () => {
+  const params = new URLSearchParams()
+  if (props.currentRoleId !== null && props.currentRoleId !== undefined && props.currentRoleId !== '') {
+    params.set('roleId', String(props.currentRoleId))
+  }
+  const query = params.toString()
+  return query ? `?${query}` : ''
+}
+
+const loadMemories = async () => {
+  if (!form.memosEnabled) return
+  memoryLoading.value = true
+  memoryError.value = ''
+  try {
+    const res = await apiFetch(`/api/memories${memoryQuery()}`)
+    const data = await res.json()
+    memories.value = Array.isArray(data.items) ? data.items : []
+  } catch (e) {
+    console.error(e)
+    memoryError.value = e?.message || '加载记忆失败'
+  } finally {
+    memoryLoading.value = false
+  }
+}
+
+const deleteMemory = async (memory) => {
+  if (!memory?.id) return
+  if (!window.confirm(`确定删除这条记忆吗？\n\n${memory.text}`)) return
+  memoryDeletingId.value = memory.id
+  memoryError.value = ''
+  try {
+    const res = await apiFetch(`/api/memories/${encodeURIComponent(memory.id)}${memoryQuery()}`, {
+      method: 'DELETE'
+    })
+    const data = await res.json()
+    if (!data.success) {
+      throw new Error('删除记忆失败')
+    }
+    memories.value = memories.value.filter(item => item.id !== memory.id)
+    ElMessage.success('记忆已删除')
+  } catch (e) {
+    console.error(e)
+    memoryError.value = e?.message || '删除记忆失败'
+    ElMessage.error(memoryError.value)
+  } finally {
+    memoryDeletingId.value = ''
+  }
+}
+
+const feedbackMemory = async (memory) => {
+  const feedback = memoryFeedback[memory?.id]?.trim()
+  if (!memory?.id || !feedback) return
+  memoryFeedbackId.value = memory.id
+  memoryError.value = ''
+  try {
+    const res = await apiFetch(`/api/memories/${encodeURIComponent(memory.id)}/feedback${memoryQuery()}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feedback })
+    })
+    const data = await res.json()
+    if (!data.success) {
+      throw new Error('提交记忆纠错失败')
+    }
+    memoryFeedback[memory.id] = ''
+    ElMessage.success('记忆纠错已提交')
+    await loadMemories()
+  } catch (e) {
+    console.error(e)
+    memoryError.value = e?.message || '提交记忆纠错失败'
+    ElMessage.error(memoryError.value)
+  } finally {
+    memoryFeedbackId.value = ''
+  }
+}
+
+onMounted(async () => {
+  await loadSettings()
+  if (props.show) {
+    await loadMemories()
+  }
+})
 
 watch(() => props.show, (newVal, oldVal) => {
   if (oldVal && !newVal && form.darkMode !== darkModeSnapshot) {
@@ -316,7 +505,7 @@ watch(() => props.show, (newVal, oldVal) => {
     document.documentElement.classList.toggle('dark', darkModeSnapshot)
   }
   if (newVal) {
-    loadSettings()
+    loadSettings().then(loadMemories)
     darkModeSnapshot = form.darkMode
   }
 })
