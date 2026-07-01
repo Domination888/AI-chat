@@ -293,6 +293,61 @@
           </div>
         </div>
 
+        <!-- Live2D -->
+        <div class="border dark:border-gray-700 rounded-lg p-3">
+          <h4 class="font-semibold dark:text-gray-100 mb-3">Live2D</h4>
+          <div class="space-y-4">
+            <div>
+              <div class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">动作</div>
+              <div class="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                <button
+                  v-for="motion in allLive2dMotions"
+                  :key="`${motion.group}-${motion.index}`"
+                  type="button"
+                  @click="playLive2dMotion(motion)"
+                  class="px-3 py-2 text-xs border border-gray-300 dark:border-gray-600 dark:text-gray-300 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition"
+                >
+                  {{ motion.name }}
+                </button>
+              </div>
+            </div>
+            <div>
+              <div class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">表情</div>
+              <div class="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                <button
+                  v-for="expression in allLive2dExpressions"
+                  :key="expression"
+                  type="button"
+                  @click="playLive2dExpression(expression)"
+                  class="px-3 py-2 text-xs border border-gray-300 dark:border-gray-600 dark:text-gray-300 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition"
+                >
+                  {{ expression }}
+                </button>
+                <button
+                  type="button"
+                  @click="resetLive2dExpression"
+                  class="px-3 py-2 text-xs border border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-300 rounded-md hover:bg-amber-50 dark:hover:bg-amber-950/40 transition"
+                >
+                  重置
+                </button>
+              </div>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">模型大小</label>
+              <input
+                v-model.number="live2dScale"
+                type="range"
+                min="0.3"
+                max="2.0"
+                step="0.05"
+                class="w-full"
+                @input="setLive2dScale"
+              />
+              <div class="text-xs text-gray-500 dark:text-gray-400 text-center">{{ live2dScale.toFixed(2) }}x</div>
+            </div>
+          </div>
+        </div>
+
         <!-- 其他 -->
         <div class="border dark:border-gray-700 rounded-lg p-3">
           <h4 class="font-semibold dark:text-gray-100 mb-3">其他</h4>
@@ -344,6 +399,7 @@ import {
   saveRuntimeConfig
 } from '../utils/runtimeConfig.js'
 import { apiFetch } from '../utils/api.js'
+import { allLive2dExpressions, allLive2dMotions } from '../live2d/live2d-options.js'
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -361,6 +417,7 @@ const memoryDeletingId = ref('')
 const memoryFeedbackId = ref('')
 const memoryError = ref('')
 const memoryFeedback = reactive({})
+const live2dScale = ref(1.0)
 
 const PROACTIVE_IDLE_STEP = 1800
 const PROACTIVE_IDLE_DEFAULT = 3600
@@ -388,6 +445,28 @@ const selectRecentLlmModel = (model) => {
   form.modelBaseUrl = model.baseUrl
   form.modelName = model.modelName
   form.llmStreamingModelName = model.streamingModelName || model.modelName
+}
+
+const sendLive2dControl = (action, data = null) => {
+  if (window.electronAPI?.live2dControl) {
+    window.electronAPI.live2dControl(action, data)
+  }
+}
+
+const playLive2dMotion = (motion) => {
+  sendLive2dControl('motion', motion)
+}
+
+const playLive2dExpression = (name) => {
+  sendLive2dControl('expression', { name })
+}
+
+const resetLive2dExpression = () => {
+  sendLive2dControl('reset')
+}
+
+const setLive2dScale = () => {
+  sendLive2dControl('scale', { scale: live2dScale.value })
 }
 
 const applyForm = (settings) => {

@@ -2,47 +2,13 @@
   <div class="live2d-root">
     <canvas ref="canvasRef" class="live2d-canvas"
             @mousedown="onCanvasMouseDown"></canvas>
-
-    <!-- 动作面板（可折叠） -->
-    <div class="motion-panel" v-if="showPanel" @mousedown.stop @click.stop>
-      <div class="panel-header">
-        <span>动作</span>
-        <button @click="showPanel = false" class="btn-close">x</button>
-      </div>
-      <div class="panel-grid">
-        <button v-for="m in allMotions" :key="m.group+m.index"
-                @click="playMotion(m)" class="btn-motion">
-          {{ m.name }}
-        </button>
-      </div>
-      <div class="panel-header" style="margin-top:6px">
-        <span>表情</span>
-      </div>
-      <div class="panel-grid">
-        <button v-for="e in allExpressions" :key="e"
-                @click="playExpression(e)" class="btn-motion">
-          {{ e }}
-        </button>
-        <button @click="resetExpression" class="btn-motion btn-reset">重置</button>
-      </div>
-      <div class="panel-header" style="margin-top:6px">
-        <span>大小</span>
-      </div>
-      <input type="range" min="0.3" max="2.0" step="0.05"
-             v-model.number="scaleValue"
-             @input="onScaleChange"
-             class="scale-slider" />
-    </div>
-
-    <!-- 面板开关按钮 -->
-    <button v-if="!showPanel" @click.stop="showPanel = true"
-            @mousedown.stop class="btn-toggle">☰</button>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { live2dController } from '../live2d/live2d-controller.js'
+import { allLive2dMotions, clickLive2dMotions } from '../live2d/live2d-options.js'
 import * as PIXI from 'pixi.js'
 import { Live2DModel, config } from 'pixi-live2d-display-lipsyncpatch/cubism4'
 
@@ -50,13 +16,116 @@ window.PIXI = PIXI
 config.sound = false
 
 const canvasRef = ref(null)
-const showPanel = ref(false)
 const scaleValue = ref(1.0)
 
 let app = null
 let model = null
 let baseScale = 1.0
 let expressionTimer = null
+let resizeFrame = null
+let lastIgnoreMouse = null
+let lastMouseProbeAt = 0
+
+const MODEL_PADDING = 36
+const MIN_OVERLAY_WIDTH = 96
+const MIN_OVERLAY_HEIGHT = 140
+const ALPHA_HIT_THRESHOLD = 12
+const MOUSE_PROBE_INTERVAL = 24
+
+const setMousePassthrough = (ignore) => {
+  if (lastIgnoreMouse === ignore) return
+  lastIgnoreMouse = ignore
+  if (window.live2dAPI?.setIgnoreMouseEvents) {
+    window.live2dAPI.setIgnoreMouseEvents(ignore)
+  }
+}
+
+const isInteractiveControlPoint = (x, y) => {
+  const el = document.elementFromPoint(x, y)
+  return Boolean(el?.closest?.('[data-live2d-control]'))
+}
+
+const getCanvasAlphaAt = (clientX, clientY) => {
+  if (!app || !canvasRef.value) return 0
+  const renderer = app.renderer
+  const gl = renderer?.gl
+  if (!gl) return 0
+
+  const canvas = canvasRef.value
+  const rect = canvas.getBoundingClientRect()
+  if (!rect.width || !rect.height) return 0
+
+  const x = Math.floor(((clientX - rect.left) / rect.width) * canvas.width)
+  const y = Math.floor(((clientY - rect.top) / rect.height) * canvas.height)
+  if (x < 0 || x >= canvas.width || y < 0 || y >= canvas.height) return 0
+
+  const pixel = new Uint8Array(4)
+  try {
+    gl.readPixels(x, canvas.height - y - 1, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel)
+    return pixel[3]
+  } catch (err) {
+    console.warn('[Live2DOverlay] alpha probe failed:', err)
+    return 0
+  }
+}
+
+const updateMousePassthrough = (e, force = false) => {
+  if (_downScreen) {
+    setMousePassthrough(false)
+    return
+  }
+  if (force || isInteractiveControlPoint(e.clientX, e.clientY)) {
+    setMousePassthrough(false)
+    return
+  }
+
+  const now = performance.now()
+  if (now - lastMouseProbeAt < MOUSE_PROBE_INTERVAL) return
+  lastMouseProbeAt = now
+
+  const alpha = getCanvasAlphaAt(e.clientX, e.clientY)
+  setMousePassthrough(alpha <= ALPHA_HIT_THRESHOLD)
+}
+
+const onWindowMouseLeave = () => {
+  setMousePassthrough(true)
+}
+
+const resizeRenderer = (width, height) => {
+  if (!app || !model) return
+  app.renderer.resize(width, height)
+  model.x = app.screen.width / 2
+  model.y = app.screen.height / 2
+}
+
+const fitWindowToModel = async () => {
+  if (!model || !app || !window.live2dAPI?.getBounds || !window.live2dAPI?.setBounds) return
+
+  const currentBounds = await window.live2dAPI.getBounds()
+  if (!currentBounds) return
+
+  const nextWidth = Math.max(MIN_OVERLAY_WIDTH, Math.ceil(model.width + MODEL_PADDING * 2))
+  const nextHeight = Math.max(MIN_OVERLAY_HEIGHT, Math.ceil(model.height + MODEL_PADDING * 2))
+  const centerX = currentBounds.x + model.x
+  const centerY = currentBounds.y + model.y
+  const nextBounds = {
+    x: centerX - nextWidth / 2,
+    y: centerY - nextHeight / 2,
+    width: nextWidth,
+    height: nextHeight,
+  }
+
+  resizeRenderer(nextWidth, nextHeight)
+  window.live2dAPI.setBounds(nextBounds)
+}
+
+const scheduleFitWindowToModel = () => {
+  if (resizeFrame) cancelAnimationFrame(resizeFrame)
+  resizeFrame = requestAnimationFrame(() => {
+    resizeFrame = null
+    fitWindowToModel()
+  })
+}
 
 // ============================================================
 // 点击互动 + 窗口拖动：
@@ -107,6 +176,7 @@ const _onDocMouseUp = (e) => {
 let _downWinPos = null  // mousedown 时窗口的屏幕位置
 
 const onCanvasMouseDown = (e) => {
+  setMousePassthrough(false)
   _downScreen = { x: e.screenX, y: e.screenY }
   _downClient = { x: e.clientX, y: e.clientY }
   _mouseDownEvent = e
@@ -131,7 +201,7 @@ const doHitTest = (e) => {
     const hw = model.width / 2
     const hh = model.height / 2
     if (x >= model.x - hw && x <= model.x + hw && y >= model.y - hh && y <= model.y + hh) {
-      const m = clickMotions[Math.floor(Math.random() * clickMotions.length)]
+      const m = clickLive2dMotions[Math.floor(Math.random() * clickLive2dMotions.length)]
       playMotion(m)
       console.log('[Live2D] click hit →', m.name)
       // 通知主窗口用户点击了模型（触发主动说话）
@@ -145,25 +215,6 @@ const doHitTest = (e) => {
 // ============================================================
 // 动作 / 表情 / 缩放
 // ============================================================
-
-// 所有动作（含待机和入场）
-const allMotions = [
-  { name: '待机', group: 'Idle', index: 0 },
-  { name: '入场', group: 'Entry', index: 0 },
-  { name: '种到土里', group: 'Tap#4', index: 0 },
-  { name: '种到地里', group: 'Tap#4', index: 1 },
-  { name: '谷种入田野', group: 'Tap#4', index: 2 },
-  { name: '钓鱼', group: 'Tap#4', index: 3 },
-  { name: '掐腰', group: 'Tap#4', index: 4 },
-  { name: '有大麟', group: 'Tap#4', index: 5 },
-  { name: '生气', group: 'Tap#4', index: 6 },
-  { name: '晃手', group: 'Tap#4', index: 7 },
-  { name: '闭眼', group: 'Tap#4', index: 8 },
-]
-const allExpressions = ['闭眼', '皱眉', '闭一只眼', '震惊']
-const clickMotions = allMotions.filter(m =>
-  ['晃手', '种到地里', '谷种入田野', '钓鱼'].includes(m.name)
-)
 
 const playMotion = (m) => {
   if (!model) return
@@ -236,6 +287,14 @@ const resetExpression = () => {
 const onScaleChange = () => {
   if (!model) return
   model.scale.set(baseScale * scaleValue.value)
+  scheduleFitWindowToModel()
+}
+
+const setScale = (scale) => {
+  const nextScale = Number(scale)
+  if (!Number.isFinite(nextScale)) return
+  scaleValue.value = Math.min(2.0, Math.max(0.3, nextScale))
+  onScaleChange()
 }
 
 // ============================================================
@@ -247,6 +306,7 @@ onMounted(async () => {
       view: canvasRef.value,
       backgroundAlpha: 0,
       autoDensity: true,
+      preserveDrawingBuffer: true,
       resolution: window.devicePixelRatio || 1,
       width: 350,
       height: 500,
@@ -272,6 +332,10 @@ onMounted(async () => {
 
     app.stage.addChild(model)
     live2dController.setModel(model)
+    scheduleFitWindowToModel()
+    setMousePassthrough(true)
+    window.addEventListener('mousemove', updateMousePassthrough)
+    window.addEventListener('mouseleave', onWindowMouseLeave)
 
     // 修复 idle 动画循环播放问题：
     // 默认 idleMotionFadingDuration=2000ms（2s），导致每次 idle 重新调度时
@@ -312,6 +376,19 @@ onMounted(async () => {
             live2dController.triggerEmotion(emotion)
             break
           }
+          case 'motion': {
+            const motion = typeof data === 'string'
+              ? allLive2dMotions.find(item => item.name === data)
+              : data
+            if (motion) playMotion(motion)
+            break
+          }
+          case 'expression': {
+            const expression = typeof data === 'string' ? data : data?.name
+            if (expression) playExpression(expression)
+            break
+          }
+          case 'scale': setScale(typeof data === 'number' ? data : data?.scale); break
           case 'reset': resetExpression(); break
           case 'end': live2dController.onConversationEnd(); break
           case 'stopLipSync': live2dController.stopLipSync(); break
@@ -328,6 +405,10 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   document.removeEventListener('mousemove', _onDocMouseMove)
   document.removeEventListener('mouseup', _onDocMouseUp)
+  window.removeEventListener('mousemove', updateMousePassthrough)
+  window.removeEventListener('mouseleave', onWindowMouseLeave)
+  if (resizeFrame) cancelAnimationFrame(resizeFrame)
+  setMousePassthrough(false)
   if (expressionTimer) clearTimeout(expressionTimer)
   live2dController.clearModel()
   if (model) { app?.stage.removeChild(model); model = null }
@@ -350,74 +431,4 @@ onBeforeUnmount(() => {
   height: 100%;
   z-index: 1;
 }
-
-/* 动作面板 */
-.motion-panel {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 10;
-  background: rgba(0,0,0,0.65);
-  border-radius: 8px;
-  padding: 6px;
-  color: #fff;
-  font-size: 12px;
-  max-height: 90vh;
-  overflow-y: auto;
-  -webkit-app-region: no-drag;
-}
-.panel-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-weight: bold;
-  margin-bottom: 4px;
-}
-.btn-close {
-  background: none;
-  border: none;
-  color: #aaa;
-  cursor: pointer;
-  font-size: 14px;
-  padding: 0 4px;
-}
-.btn-close:hover { color: #fff; }
-.panel-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 4px;
-}
-.btn-motion {
-  background: rgba(255,255,255,0.15);
-  border: 1px solid rgba(255,255,255,0.2);
-  color: #fff;
-  border-radius: 4px;
-  padding: 4px 2px;
-  font-size: 11px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.btn-motion:hover { background: rgba(255,255,255,0.3); }
-.btn-reset { background: rgba(255,200,0,0.3); }
-.scale-slider {
-  width: 100%;
-  margin-top: 4px;
-  cursor: pointer;
-}
-.btn-toggle {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 10;
-  background: rgba(0,0,0,0.5);
-  color: #fff;
-  border: none;
-  border-radius: 4px;
-  width: 28px;
-  height: 28px;
-  font-size: 16px;
-  cursor: pointer;
-  -webkit-app-region: no-drag;
-}
-.btn-toggle:hover { background: rgba(0,0,0,0.7); }
 </style>

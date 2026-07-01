@@ -5,6 +5,12 @@ contextBridge.exposeInMainWorld('live2dAPI', {
   // 拖动窗口：发送屏幕绝对坐标
   moveWindow: (x, y) => ipcRenderer.send('live2d-move', { x, y }),
 
+  getBounds: () => ipcRenderer.invoke('live2d-get-bounds'),
+
+  setBounds: (bounds) => ipcRenderer.send('live2d-set-bounds', bounds),
+
+  setIgnoreMouseEvents: (ignore) => ipcRenderer.send('live2d-ignore-mouse', ignore),
+
   // 监听主窗口发来的 Live2D 控制动作
   onAction: (callback) => {
     ipcRenderer.on('live2d-action', (_event, action, data) => callback(action, data));

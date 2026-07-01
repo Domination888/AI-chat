@@ -239,6 +239,39 @@ ipcMain.on('live2d-move', (_event, { x, y }) => {
   }
 });
 
+ipcMain.handle('live2d-get-bounds', () => {
+  if (live2dWindow && !live2dWindow.isDestroyed()) {
+    return live2dWindow.getBounds();
+  }
+  return null;
+});
+
+ipcMain.on('live2d-set-bounds', (_event, bounds) => {
+  if (!live2dWindow || live2dWindow.isDestroyed() || !bounds) return;
+  const display = screen.getDisplayNearestPoint({
+    x: Math.round(bounds.x),
+    y: Math.round(bounds.y),
+  });
+  const workArea = display.workArea;
+  const width = Math.max(1, Math.round(bounds.width));
+  const height = Math.max(1, Math.round(bounds.height));
+  const maxX = Math.max(workArea.x, workArea.x + workArea.width - width);
+  const maxY = Math.max(workArea.y, workArea.y + workArea.height - height);
+  const nextBounds = {
+    x: Math.min(Math.max(Math.round(bounds.x), workArea.x), maxX),
+    y: Math.min(Math.max(Math.round(bounds.y), workArea.y), maxY),
+    width,
+    height,
+  };
+  live2dWindow.setBounds(nextBounds);
+});
+
+ipcMain.on('live2d-ignore-mouse', (_event, ignore) => {
+  if (live2dWindow && !live2dWindow.isDestroyed()) {
+    live2dWindow.setIgnoreMouseEvents(Boolean(ignore), { forward: true });
+  }
+});
+
 ipcMain.on('live2d-interact', () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('live2d-interact-event');
