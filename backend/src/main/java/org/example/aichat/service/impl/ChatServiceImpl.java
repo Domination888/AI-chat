@@ -141,7 +141,7 @@ public class ChatServiceImpl implements ChatService {
             log.error("保存会话失败", e);
         }
 
-        // 1️⃣ 构建 System Prompt：基底 → 能力层（技能）→ 角色层 → 记忆
+        // 1️⃣ 构建 System Prompt：基底 → 能力层（技能）→ 角色层
         StringBuilder sysPrompt = new StringBuilder();
         sysPrompt.append(roleCardService.buildBasePrompt()).append("\n\n");
 
@@ -163,6 +163,7 @@ public class ChatServiceImpl implements ChatService {
                 .chatMemoryStore(chatMemoryStore)
                 .build();
         List<Map<String, String>> memosChatHistory = toMemosHistory(chatMemory.messages(), MAX_MEMORY_MESSAGES);
+        StringBuilder memoryContext = new StringBuilder();
 
         // 3️⃣ 加载长期记忆（Memos 结构化分段注入）
         if (request.getMessage() != null) {
@@ -173,20 +174,20 @@ public class ChatServiceImpl implements ChatService {
             if (!memResult.isEmpty()) {
                 // 用户事实记忆（UserMemory）—— 关于"用户是谁/喜欢什么"的事实
                 if (!memResult.userMemories().isEmpty()) {
-                    sysPrompt.append("【关于用户的事实记忆】（你已知的用户信息，回答时必须参照，不要重复询问）\n");
+                    memoryContext.append("【关于用户的事实记忆】（你已知的用户信息，回答时必须参照，不要重复询问）\n");
                     for (MemosClient.MemoryItem m : memResult.userMemories()) {
-                        sysPrompt.append("- ").append(m.text()).append("\n");
+                        memoryContext.append("- ").append(m.text()).append("\n");
                     }
-                    sysPrompt.append("\n");
+                    memoryContext.append("\n");
                 }
 
                 // 长期记忆/角色日记（LongTermMemory）—— 角色第一人称视角的回忆
                 if (!memResult.longTermMemories().isEmpty()) {
-                    sysPrompt.append("【你与用户之间的往事回忆】（以你的视角发生过的事，可作为话题与情感参考）\n");
+                    memoryContext.append("【你与用户之间的往事回忆】（以你的视角发生过的事，可作为话题与情感参考）\n");
                     for (MemosClient.MemoryItem m : memResult.longTermMemories()) {
-                        sysPrompt.append("- ").append(m.text()).append("\n");
+                        memoryContext.append("- ").append(m.text()).append("\n");
                     }
-                    sysPrompt.append("\n");
+                    memoryContext.append("\n");
                 }
 
                 // 偏好记忆（PrefMemory）—— Memos 提取的用户偏好
@@ -201,7 +202,7 @@ public class ChatServiceImpl implements ChatService {
                 // Memos 不可用时降级到 Redis RAG 长期记忆
                 String longTermMemory = ragService.searchLongTermMemoryContext(userId, roleId, request.getMessage(), 3);
                 if (longTermMemory != null && !longTermMemory.isEmpty()) {
-                    sysPrompt.append("【曾经闪过的往事片段】\n").append(longTermMemory).append("\n\n");
+                    memoryContext.append("【曾经闪过的往事片段】\n").append(longTermMemory).append("\n\n");
                 }
             }
         }
@@ -276,10 +277,9 @@ public class ChatServiceImpl implements ChatService {
             }
 
             String ragContext = ragService.retrieveContext(roleCode, request.getMessage(), 3);
-            if (ragContext != null && !ragContext.isEmpty()) {
-                allMessages.add(allMessages.size() - 1, UserMessage.from(ragContext));
-                log.info("已注入 RAG 上下文，roleCode={}, 长度: {}", roleCode, ragContext.length());
-            }
+            injectRagAndMemoryContext(allMessages, ragContext, memoryContext.toString(), roleCode);
+        } else {
+            injectRagAndMemoryContext(allMessages, "", memoryContext.toString(), null);
         }
         if (trace != null) trace.mark("context_rag");
 
@@ -482,6 +482,36 @@ public class ChatServiceImpl implements ChatService {
             allMessages.add(allMessages.size() - 1, UserMessage.from(block));
             log.info("已注入技能/搜索上下文 [{}], 长度: {}", p.logTag(), p.body().length());
         });
+    }
+
+    private void injectRagAndMemoryContext(List<ChatMessage> allMessages,
+                                           String ragContext,
+                                           String memoryContext,
+                                           String roleCode) {
+        boolean hasRag = ragContext != null && !ragContext.isBlank();
+        boolean hasMemory = memoryContext != null && !memoryContext.isBlank();
+        if (!hasRag && !hasMemory) {
+            return;
+        }
+
+        StringBuilder block = new StringBuilder();
+        if (hasRag) {
+            block.append(ragContext.stripTrailing());
+        }
+        if (hasMemory) {
+            if (!block.isEmpty()) {
+                block.append("\n\n");
+            }
+            block.append(memoryContext.stripTrailing());
+        }
+
+        allMessages.add(allMessages.size() - 1, UserMessage.from(block.toString()));
+        if (hasRag) {
+            log.info("已注入 RAG 上下文，roleCode={}, 长度: {}", roleCode, ragContext.length());
+        }
+        if (hasMemory) {
+            log.info("已注入记忆上下文到当前问题前，长度: {}", memoryContext.length());
+        }
     }
 
     /**

@@ -51,6 +51,9 @@ public class RagServiceImpl implements RagService {
     @Value("${rag.max-context-chars:2400}")
     private int maxContextChars;
 
+    @Value("${rag.min-similarity-score:0.8}")
+    private float minSimilarityScore;
+
     @Value("${rag.embedding-batch-size:32}")
     private int embeddingBatchSize;
 
@@ -205,13 +208,13 @@ public class RagServiceImpl implements RagService {
                         float weighted = isMemoryCard(chunk) ? raw * 1.3f : raw;
                         return new ScoredChunk(chunk, weighted);
                     })
-                    .filter(sc -> sc.score > 0.1f)
+                    .filter(sc -> sc.score > minSimilarityScore)
                     .sorted(Comparator.comparingDouble(ScoredChunk::score).reversed())
                     .limit(topK)
                     .toList();
 
             if (ranked.isEmpty()) {
-                log.debug("向量检索无命中(query={}, roleCode={}, threshold=0.1)", query, roleCode);
+                log.debug("向量检索无命中(query={}, roleCode={}, threshold={})", query, roleCode, minSimilarityScore);
                 return "";
             }
 

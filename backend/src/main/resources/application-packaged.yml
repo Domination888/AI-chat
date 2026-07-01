@@ -52,6 +52,7 @@ rag:
   chunk-size: 500
   chunk-overlap: 80
   max-context-chars: 2400
+  min-similarity-score: 0.8
   embedding-batch-size: 32
   eager-init: true
   force-rebuild-on-startup: false

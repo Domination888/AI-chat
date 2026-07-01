@@ -61,6 +61,7 @@ rag:
   chunk-size: 500
   chunk-overlap: 80
   max-context-chars: 2400
+  min-similarity-score: 0.8
   embedding-batch-size: 32
   # RAG 启动策略：
   #   true  = 启动时若 Redis 缓存为空，则后台异步向量化（不阻塞应用启动），
