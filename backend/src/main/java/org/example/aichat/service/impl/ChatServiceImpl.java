@@ -199,12 +199,23 @@ public class ChatServiceImpl implements ChatService {
                     sysPrompt.append("\n");
                 }
             } else if (!memosClient.isEnabled() || memosClient.isFallbackToRag()) {
+                log.info("Memos 记忆未命中：query='{}', userId={}, roleId={}, enabled={}, fallbackToRedisRag={}",
+                        abbreviate(request.getMessage()), memosUserId, roleId,
+                        memosClient.isEnabled(), memosClient.isFallbackToRag());
                 // Memos 不可用时降级到 Redis RAG 长期记忆
                 String longTermMemory = ragService.searchLongTermMemoryContext(userId, roleId, request.getMessage(), 3);
                 if (longTermMemory != null && !longTermMemory.isEmpty()) {
                     memoryContext.append("【曾经闪过的往事片段】\n").append(longTermMemory).append("\n\n");
+                } else {
+                    log.info("Redis fallback 长期记忆未注入：query='{}', userId={}, roleId={}",
+                            abbreviate(request.getMessage()), userId, roleId);
                 }
+            } else {
+                log.info("Memos 记忆未命中：query='{}', userId={}, roleId={}, enabled=true, fallbackToRedisRag=false",
+                        abbreviate(request.getMessage()), memosUserId, roleId);
             }
+        } else {
+            log.info("记忆检索跳过：用户消息为空 userId={}, roleId={}", userId, roleId);
         }
         if (trace != null) trace.mark("context_memos");
 
@@ -277,9 +288,15 @@ public class ChatServiceImpl implements ChatService {
             }
 
             String ragContext = ragService.retrieveContext(roleCode, request.getMessage(), 3);
-            injectRagAndMemoryContext(allMessages, ragContext, memoryContext.toString(), roleCode);
+            injectRagAndMemoryContext(allMessages, ragContext, memoryContext.toString(), roleCode, request.getMessage());
         } else {
-            injectRagAndMemoryContext(allMessages, "", memoryContext.toString(), null);
+            if (!useRag) {
+                log.info("RAG 检索跳过：请求关闭 RAG query='{}', roleId={}",
+                        abbreviate(request.getMessage()), roleId);
+            } else {
+                log.info("RAG 检索跳过：用户消息为空 roleId={}", roleId);
+            }
+            injectRagAndMemoryContext(allMessages, "", memoryContext.toString(), null, request.getMessage());
         }
         if (trace != null) trace.mark("context_rag");
 
@@ -487,10 +504,12 @@ public class ChatServiceImpl implements ChatService {
     private void injectRagAndMemoryContext(List<ChatMessage> allMessages,
                                            String ragContext,
                                            String memoryContext,
-                                           String roleCode) {
+                                           String roleCode,
+                                           String query) {
         boolean hasRag = ragContext != null && !ragContext.isBlank();
         boolean hasMemory = memoryContext != null && !memoryContext.isBlank();
         if (!hasRag && !hasMemory) {
+            log.info("RAG/记忆上下文均未注入：query='{}', roleCode={}", abbreviate(query), roleCode);
             return;
         }
 
@@ -512,6 +531,14 @@ public class ChatServiceImpl implements ChatService {
         if (hasMemory) {
             log.info("已注入记忆上下文到当前问题前，长度: {}", memoryContext.length());
         }
+    }
+
+    private String abbreviate(String text) {
+        if (text == null) {
+            return "";
+        }
+        String compact = text.replaceAll("\\s+", " ").trim();
+        return compact.length() > 80 ? compact.substring(0, 80) + "..." : compact;
     }
 
     /**

@@ -9,6 +9,7 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.example.aichat.rag.RagChunk;
+import org.example.aichat.rag.RagTextSplitter;
 import org.example.aichat.service.RagService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
@@ -42,16 +43,10 @@ public class RagServiceImpl implements RagService {
 
     private static final String REDIS_RAG_KEY = "rag:chunks:embeds";
 
-    @Value("${rag.chunk-size:500}")
-    private int chunkSize;
-
-    @Value("${rag.chunk-overlap:80}")
-    private int chunkOverlap;
-
     @Value("${rag.max-context-chars:2400}")
     private int maxContextChars;
 
-    @Value("${rag.min-similarity-score:0.8}")
+    @Value("${rag.min-similarity-score:0.55}")
     private float minSimilarityScore;
 
     @Value("${rag.embedding-batch-size:32}")
@@ -177,7 +172,8 @@ public class RagServiceImpl implements RagService {
         // 启动期可能还在异步预热：第一次提问时同步等一下，最多 30s（embedding 慢的话也认了，比"RAG 静默失效"好）
         awaitWarmupIfNeeded();
         if (chunks.isEmpty()) {
-            log.debug("RAG chunks 为空（预热未完成或失败），本次跳过检索");
+            log.info("RAG 未命中：索引为空，跳过检索 query='{}', roleCode={}, topK={}",
+                    abbreviate(query), roleCode, topK);
             return "";
         }
 
@@ -198,23 +194,38 @@ public class RagServiceImpl implements RagService {
             }
 
             if (candidateChunks.isEmpty()) {
+                log.info("RAG 未命中：roleCode 过滤后无候选 chunk query='{}', roleCode={}, totalChunks={}",
+                        abbreviate(query), roleCode, chunks.size());
                 return "";
             }
 
             // 计算原始相似度并对 memory_cards 类型的分块加权（PLAN-005 阶段5：memory_cards 系数 ×1.3）
-            List<ScoredChunk> ranked = candidateChunks.stream()
+            List<ScoredChunk> scoredAll = candidateChunks.stream()
                     .map(chunk -> {
                         float raw = cosineSimilarity(queryVec, chunk.embedding());
                         float weighted = isMemoryCard(chunk) ? raw * 1.3f : raw;
-                        return new ScoredChunk(chunk, weighted);
+                        return new ScoredChunk(chunk, raw, weighted);
                     })
-                    .filter(sc -> sc.score > minSimilarityScore)
                     .sorted(Comparator.comparingDouble(ScoredChunk::score).reversed())
+                    .toList();
+
+            List<ScoredChunk> ranked = scoredAll.stream()
+                    .filter(sc -> sc.score > minSimilarityScore)
                     .limit(topK)
                     .toList();
 
             if (ranked.isEmpty()) {
-                log.debug("向量检索无命中(query={}, roleCode={}, threshold={})", query, roleCode, minSimilarityScore);
+                ScoredChunk best = scoredAll.isEmpty() ? null : scoredAll.get(0);
+                if (best == null) {
+                    log.info("RAG 未命中：无可评分候选 query='{}', roleCode={}, candidates={}, threshold={}",
+                            abbreviate(query), roleCode, candidateChunks.size(), minSimilarityScore);
+                } else {
+                    log.info("RAG 未命中：最高分未过阈值 query='{}', roleCode={}, candidates={}, threshold={}, bestSource={}#{}, bestRawScore={}, bestWeightedScore={}",
+                            abbreviate(query), roleCode, candidateChunks.size(), minSimilarityScore,
+                            best.chunk.source(), best.chunk.chunkIndex(),
+                            String.format(Locale.ROOT, "%.4f", best.rawScore()),
+                            String.format(Locale.ROOT, "%.4f", best.score()));
+                }
                 return "";
             }
 
@@ -235,6 +246,10 @@ public class RagServiceImpl implements RagService {
             }
 
             if (context.length() <= "【本地知识库检索结果】\n".length()) {
+                ScoredChunk best = ranked.get(0);
+                log.info("RAG 未注入：命中片段超过 maxContextChars 被全部跳过 query='{}', roleCode={}, maxContextChars={}, bestSource={}#{}, bestScore={}",
+                        abbreviate(query), roleCode, maxContextChars, best.chunk.source(), best.chunk.chunkIndex(),
+                        String.format(Locale.ROOT, "%.4f", best.score()));
                 return "";
             }
             return context.toString();
@@ -278,7 +293,7 @@ public class RagServiceImpl implements RagService {
     }
 
     @Override
-    public int reload() {
+    public synchronized int reload() {
         List<RagChunk> rebuilt = new ArrayList<>();
         PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
         try {
@@ -300,33 +315,29 @@ public class RagServiceImpl implements RagService {
             List<TextSegment> segmentsToEmbed = new ArrayList<>();
             List<RagChunk> tempChunks = new ArrayList<>();
 
-            // Step 1.a: 加载文本类资源并按滑窗切块
+            // Step 1.a: 加载文本类资源并按材料类型做语义切块
             for (org.springframework.core.io.Resource resource : textResources) {
                 String filename = resource.getFilename() == null ? "unknown" : resource.getFilename();
                 // 角色目录下的语料 source 必须带 roleCode 前缀（如 shu_profile.md），否则 retrieveContext 的 prefix 过滤会全过滤掉
                 String roleCode = resolveRoleCodeFromPath(resource);
                 String source = roleCode == null ? filename : roleCode + "_" + filename;
                 String text = new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-                String normalized = normalizeText(text);
-                if (!StringUtils.hasText(normalized)) {
+                List<String> semanticChunks = RagTextSplitter.split(filename, text);
+                if (semanticChunks.isEmpty()) {
                     continue;
                 }
 
-                int step = Math.max(1, chunkSize - chunkOverlap);
                 int chunkIndex = 0;
-                for (int start = 0; start < normalized.length(); start += step) {
-                    int end = Math.min(normalized.length(), start + chunkSize);
-                    String chunkText = normalized.substring(start, end).trim();
-                    if (!StringUtils.hasText(chunkText)) {
+                for (String chunkText : semanticChunks) {
+                    String normalizedChunk = normalizeText(chunkText);
+                    if (!StringUtils.hasText(normalizedChunk)) {
                         continue;
                     }
-                    Set<String> terms = extractTerms(chunkText);
-                    tempChunks.add(new RagChunk(source, chunkIndex++, chunkText, terms, null));
-                    segmentsToEmbed.add(TextSegment.from(chunkText));
-                    if (end >= normalized.length()) {
-                        break;
-                    }
+                    Set<String> terms = extractTerms(normalizedChunk);
+                    tempChunks.add(new RagChunk(source, chunkIndex++, normalizedChunk, terms, null));
+                    segmentsToEmbed.add(TextSegment.from(normalizedChunk));
                 }
+                log.info("加载 RAG 文本资源: {} -> {} 个语义分块 (roleCode={})", filename, chunkIndex, roleCode);
             }
 
             // Step 1.b: 加载 memory_cards.jsonl —— 一行一条记忆卡，单条直接作为一个 chunk
@@ -362,7 +373,7 @@ public class RagServiceImpl implements RagService {
 
             // Step 2: 批量计算向量
             log.info("开始向向量化 {} 个分块...", tempChunks.size());
-            List<Embedding> embeddings = embeddingModel.embedAll(segmentsToEmbed).content();
+            List<Embedding> embeddings = embedAllInBatches(segmentsToEmbed);
             log.info("向量化完成");
 
             // Step 3: 组装 RagChunk with vectors
@@ -378,6 +389,16 @@ public class RagServiceImpl implements RagService {
         chunks = List.copyOf(rebuilt);
         saveToRedis(rebuilt);
         return chunks.size();
+    }
+
+    private List<Embedding> embedAllInBatches(List<TextSegment> segmentsToEmbed) {
+        int batchSize = Math.max(1, embeddingBatchSize);
+        List<Embedding> embeddings = new ArrayList<>(segmentsToEmbed.size());
+        for (int start = 0; start < segmentsToEmbed.size(); start += batchSize) {
+            int end = Math.min(segmentsToEmbed.size(), start + batchSize);
+            embeddings.addAll(embeddingModel.embedAll(segmentsToEmbed.subList(start, end)).content());
+        }
+        return embeddings;
     }
 
     private String normalizeText(String text) {
@@ -418,7 +439,15 @@ public class RagServiceImpl implements RagService {
                 || block == Character.UnicodeBlock.CJK_COMPATIBILITY_IDEOGRAPHS;
     }
 
-    private record ScoredChunk(RagChunk chunk, float score) {
+    private String abbreviate(String text) {
+        if (text == null) {
+            return "";
+        }
+        String compact = text.replaceAll("\\s+", " ").trim();
+        return compact.length() > 80 ? compact.substring(0, 80) + "..." : compact;
+    }
+
+    private record ScoredChunk(RagChunk chunk, float rawScore, float score) {
     }
 
     /**
@@ -505,16 +534,26 @@ public class RagServiceImpl implements RagService {
 
     @Override
     public String searchLongTermMemoryContext(Integer userId, Integer roleId, String query, int topK) {
-        if (!StringUtils.hasText(query)) return "";
+        if (!StringUtils.hasText(query)) {
+            log.info("Redis 长期记忆未命中：query 为空 userId={}, roleId={}", userId, roleId);
+            return "";
+        }
         try {
             String redisKey = "rag:memory:" + userId + ":" + roleId;
             Map<Object, Object> entries = stringRedisTemplate.opsForHash().entries(redisKey);
-            if (entries.isEmpty()) return "";
+            if (entries.isEmpty()) {
+                log.info("Redis 长期记忆未命中：key 无记录 key={}, query='{}'", redisKey, abbreviate(query));
+                return "";
+            }
 
             List<RagChunk> memoryChunks = new ArrayList<>();
             for (Object value : entries.values()) {
                 RagChunk chunk = objectMapper.readValue((String) value, RagChunk.class);
                 memoryChunks.add(chunk);
+            }
+            if (memoryChunks.isEmpty()) {
+                log.info("Redis 长期记忆未命中：key 有记录但解析后为空 key={}, query='{}'", redisKey, abbreviate(query));
+                return "";
             }
 
             Embedding queryEmb = embeddingModel.embed(query).content();
