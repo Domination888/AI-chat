@@ -16,9 +16,11 @@ import java.util.Map;
 public class SkillController {
 
     private final SkillService skillService;
+    private final AiDailySkillService aiDailySkillService;
 
-    public SkillController(SkillService skillService) {
+    public SkillController(SkillService skillService, AiDailySkillService aiDailySkillService) {
         this.skillService = skillService;
+        this.aiDailySkillService = aiDailySkillService;
     }
 
     @GetMapping
@@ -56,5 +58,30 @@ public class SkillController {
         boolean ok = skillService.delete(name);
         return ok ? ResponseEntity.ok(Map.of("ok", true))
                 : ResponseEntity.badRequest().body(Map.of("ok", false, "message", "技能不存在"));
+    }
+
+    @PostMapping("/{name}/actions/test-fetch")
+    public ResponseEntity<Map<String, Object>> testFetch(@PathVariable String name) {
+        if (!AiDailySkillService.SKILL_NAME.equalsIgnoreCase(name)) {
+            return ResponseEntity.badRequest().body(Map.of("ok", false, "message", "该技能不支持 test-fetch"));
+        }
+        return aiDailySkillService.fetchLatestDigest()
+                .<ResponseEntity<Map<String, Object>>>map(digest -> ResponseEntity.ok(Map.of(
+                        "ok", true,
+                        "title", digest.title(),
+                        "sourceUrl", digest.sourceUrl(),
+                        "items", digest.items())))
+                .orElseGet(() -> ResponseEntity.badRequest().body(Map.of(
+                        "ok", false,
+                        "message", "未读取到 AI 日报；请确认技能已启用且 RSS 可访问")));
+    }
+
+    @PostMapping("/{name}/actions/trigger")
+    public ResponseEntity<Map<String, Object>> trigger(@PathVariable String name) {
+        if (!AiDailySkillService.SKILL_NAME.equalsIgnoreCase(name)) {
+            return ResponseEntity.badRequest().body(Map.of("ok", false, "message", "该技能不支持 trigger"));
+        }
+        boolean triggered = aiDailySkillService.triggerNow();
+        return ResponseEntity.ok(Map.of("ok", triggered, "triggered", triggered));
     }
 }

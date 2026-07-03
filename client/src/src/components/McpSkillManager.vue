@@ -83,6 +83,8 @@
                 <div class="flex items-center gap-2">
                   <span class="font-medium dark:text-gray-100">{{ s.name }}</span>
                   <span v-if="s.mcpTools && s.mcpTools.length" class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">{{ s.mcpTools.join(', ') }}</span>
+                  <span v-if="s.schedule && s.schedule.enabled" class="text-[10px] px-1.5 py-0.5 rounded bg-cyan-100 text-cyan-700">定时</span>
+                  <span v-if="s.proactive && s.proactive.enabled" class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">主动话题</span>
                 </div>
                 <div class="text-xs text-gray-400 mt-1">{{ s.description }}</div>
               </div>
@@ -341,12 +343,14 @@ async function loadSkills() {
 }
 
 function newSkill() {
-  skillForm.value = { name: '', description: '', enabled: true, mcpToolsText: '', instructions: '', dirName: '' }
+  skillForm.value = { name: '', description: '', enabled: true, mcpToolsText: '', instructions: '', dirName: '',
+    schedule: null, source: null, proactive: null }
 }
 function editSkill(s) {
   skillForm.value = {
     name: s.name, description: s.description, enabled: s.enabled,
     mcpToolsText: (s.mcpTools || []).join(', '), instructions: s.instructions, dirName: s.dirName,
+    schedule: s.schedule || null, source: s.source || null, proactive: s.proactive || null,
   }
 }
 
@@ -358,6 +362,9 @@ async function saveSkill() {
     name: f.name, description: f.description, enabled: f.enabled,
     mcpTools: f.mcpToolsText.split(',').map(s => s.trim()).filter(Boolean),
     instructions: f.instructions, dirName: f.dirName || undefined,
+    schedule: f.schedule || undefined,
+    source: f.source || undefined,
+    proactive: f.proactive || undefined,
   }
   try {
     const res = await apiFetch('/api/skills', {

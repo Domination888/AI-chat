@@ -38,9 +38,42 @@ public class SkillManifest {
     /** 该技能建议/绑定使用的 MCP 工具名 */
     private List<String> mcpTools = new ArrayList<>();
 
+    /** 定时型技能配置；为空表示非定时技能 */
+    private ScheduleConfig schedule;
+
+    /** 外部内容来源配置；为空表示无固定外部来源 */
+    private SourceConfig source;
+
+    /** 主动对话配置；为空表示不主动触发 */
+    private ProactiveConfig proactive;
+
     /** 正文：技能的详细指令（Markdown） */
     private String instructions = "";
 
     /** 磁盘上的目录名（只读，由后端填充） */
     private String dirName;
+
+    @Data
+    public static class ScheduleConfig {
+        private boolean enabled = false;
+        private String cron = "";
+        private String zone = "Asia/Shanghai";
+        private Integer hour = 10;
+        private Integer minute = 0;
+    }
+
+    @Data
+    public static class SourceConfig {
+        private String type = "rss";
+        private String url = "";
+        private String fallbackMarkdownRepo = "";
+    }
+
+    @Data
+    public static class ProactiveConfig {
+        private boolean enabled = false;
+        private String topicMode = "";
+        private int maxItems = 5;
+        private String promptTemplate = "";
+    }
 }

@@ -48,6 +48,7 @@ public class SkillService {
             }
             seedWeatherIfMissing();
             seedPrimeCheckIfMissing();
+            seedAiDailyIfMissing();
         } catch (IOException e) {
             log.warn("初始化技能目录失败: {}", e.getMessage());
         }
@@ -226,6 +227,18 @@ public class SkillService {
                     for (Object t : tl) toolNames.add(String.valueOf(t));
                     m.setMcpTools(toolNames);
                 }
+                Object schedule = meta.get("schedule");
+                if (schedule instanceof Map<?, ?> sm) {
+                    m.setSchedule(parseSchedule(sm));
+                }
+                Object source = meta.get("source");
+                if (source instanceof Map<?, ?> so) {
+                    m.setSource(parseSource(so));
+                }
+                Object proactive = meta.get("proactive");
+                if (proactive instanceof Map<?, ?> pm) {
+                    m.setProactive(parseProactive(pm));
+                }
             }
         }
         m.setInstructions(body.strip());
@@ -241,9 +254,80 @@ public class SkillService {
         meta.put("enabled", m.isEnabled());
         meta.put("version", m.getVersion() == null ? "1.0.0" : m.getVersion());
         meta.put("mcpTools", m.getMcpTools() == null ? new ArrayList<>() : m.getMcpTools());
+        if (m.getSchedule() != null) {
+            meta.put("schedule", scheduleMap(m.getSchedule()));
+        }
+        if (m.getSource() != null) {
+            meta.put("source", sourceMap(m.getSource()));
+        }
+        if (m.getProactive() != null) {
+            meta.put("proactive", proactiveMap(m.getProactive()));
+        }
 
         String yaml = new Yaml(opts).dump(meta);
         return "---\n" + yaml + "---\n\n" + (m.getInstructions() == null ? "" : m.getInstructions().strip()) + "\n";
+    }
+
+    private SkillManifest.ScheduleConfig parseSchedule(Map<?, ?> map) {
+        SkillManifest.ScheduleConfig cfg = new SkillManifest.ScheduleConfig();
+        if (map.get("enabled") != null) cfg.setEnabled(Boolean.parseBoolean(String.valueOf(map.get("enabled"))));
+        if (map.get("cron") != null) cfg.setCron(String.valueOf(map.get("cron")));
+        if (map.get("zone") != null) cfg.setZone(String.valueOf(map.get("zone")));
+        if (map.get("hour") != null) cfg.setHour(parseInt(map.get("hour"), cfg.getHour()));
+        if (map.get("minute") != null) cfg.setMinute(parseInt(map.get("minute"), cfg.getMinute()));
+        return cfg;
+    }
+
+    private SkillManifest.SourceConfig parseSource(Map<?, ?> map) {
+        SkillManifest.SourceConfig cfg = new SkillManifest.SourceConfig();
+        if (map.get("type") != null) cfg.setType(String.valueOf(map.get("type")));
+        if (map.get("url") != null) cfg.setUrl(String.valueOf(map.get("url")));
+        if (map.get("fallbackMarkdownRepo") != null) cfg.setFallbackMarkdownRepo(String.valueOf(map.get("fallbackMarkdownRepo")));
+        return cfg;
+    }
+
+    private SkillManifest.ProactiveConfig parseProactive(Map<?, ?> map) {
+        SkillManifest.ProactiveConfig cfg = new SkillManifest.ProactiveConfig();
+        if (map.get("enabled") != null) cfg.setEnabled(Boolean.parseBoolean(String.valueOf(map.get("enabled"))));
+        if (map.get("topicMode") != null) cfg.setTopicMode(String.valueOf(map.get("topicMode")));
+        if (map.get("maxItems") != null) cfg.setMaxItems(parseInt(map.get("maxItems"), cfg.getMaxItems()));
+        if (map.get("promptTemplate") != null) cfg.setPromptTemplate(String.valueOf(map.get("promptTemplate")));
+        return cfg;
+    }
+
+    private int parseInt(Object raw, Integer fallback) {
+        try {
+            return Integer.parseInt(String.valueOf(raw));
+        } catch (Exception e) {
+            return fallback == null ? 0 : fallback;
+        }
+    }
+
+    private Map<String, Object> scheduleMap(SkillManifest.ScheduleConfig cfg) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("enabled", cfg.isEnabled());
+        map.put("cron", cfg.getCron() == null ? "" : cfg.getCron());
+        map.put("zone", cfg.getZone() == null ? "Asia/Shanghai" : cfg.getZone());
+        map.put("hour", cfg.getHour() == null ? 10 : cfg.getHour());
+        map.put("minute", cfg.getMinute() == null ? 0 : cfg.getMinute());
+        return map;
+    }
+
+    private Map<String, Object> sourceMap(SkillManifest.SourceConfig cfg) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("type", cfg.getType() == null ? "rss" : cfg.getType());
+        map.put("url", cfg.getUrl() == null ? "" : cfg.getUrl());
+        map.put("fallbackMarkdownRepo", cfg.getFallbackMarkdownRepo() == null ? "" : cfg.getFallbackMarkdownRepo());
+        return map;
+    }
+
+    private Map<String, Object> proactiveMap(SkillManifest.ProactiveConfig cfg) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("enabled", cfg.isEnabled());
+        map.put("topicMode", cfg.getTopicMode() == null ? "" : cfg.getTopicMode());
+        map.put("maxItems", cfg.getMaxItems());
+        map.put("promptTemplate", cfg.getPromptTemplate() == null ? "" : cfg.getPromptTemplate());
+        return map;
     }
 
     private String slug(String name) {
@@ -335,5 +419,59 @@ public class SkillService {
                 4. 在角色扮演场景下仍须如实传达工具结论，不得用比喻替代判断结果。
                 """);
         save(prime);
+    }
+
+    private void seedAiDailyIfMissing() {
+        Path dailyDir = appPaths.skillsDir().resolve("ai-daily-juya");
+        if (Files.isRegularFile(dailyDir.resolve("SKILL.md"))) {
+            return;
+        }
+        log.info("写入内置技能 ai-daily-juya: {}", dailyDir);
+        SkillManifest daily = new SkillManifest();
+        daily.setDirName("ai-daily-juya");
+        daily.setName("ai-daily-juya");
+        daily.setDescription("每天 10:00 读取 juya AI 日报；用户询问今天 AI/科技新闻时，也读取当天日报作为回答依据");
+        daily.setEnabled(false);
+        daily.setVersion("1.0.0");
+        daily.setMcpTools(new ArrayList<>());
+
+        SkillManifest.ScheduleConfig schedule = new SkillManifest.ScheduleConfig();
+        schedule.setEnabled(true);
+        schedule.setCron("0 0 10 * * *");
+        schedule.setZone("Asia/Shanghai");
+        schedule.setHour(10);
+        schedule.setMinute(0);
+        daily.setSchedule(schedule);
+
+        SkillManifest.SourceConfig source = new SkillManifest.SourceConfig();
+        source.setType("rss");
+        source.setUrl("https://daily.juya.uk/rss.xml");
+        source.setFallbackMarkdownRepo("");
+        daily.setSource(source);
+
+        SkillManifest.ProactiveConfig proactive = new SkillManifest.ProactiveConfig();
+        proactive.setEnabled(true);
+        proactive.setTopicMode("daily_digest");
+        proactive.setMaxItems(20);
+        proactive.setPromptTemplate("""
+                [System: 你刚读完今天的 AI 日报。请挑 1-2 个和用户可能相关的看点，自然主动开个话题。不要逐条播报全文。必须基于已读取的日报内容，不要编造新闻。]
+                """.strip());
+        daily.setProactive(proactive);
+
+        daily.setInstructions("""
+                ### 何时使用
+
+                1. 每天 10:00 自动读取 juya AI 日报，并可作为主动对话话题。
+                2. 用户询问「今天有什么新闻」「今天 AI 有什么新闻」「AI 日报」「今日科技/人工智能资讯」等当天新闻问题时，读取当天 AI 日报再回答。
+
+                ### 使用步骤
+
+                1. 优先使用系统已注入的「【AI 日报 · 技能 ai-daily-juya】」内容。
+                2. 用户追问某条新闻的具体内容时，必须优先使用系统注入的「日报原始链接检索」结果；没有检索结果时要明确说明。
+                3. 回答时只概括关键看点，不要照搬全文。
+                4. 事实必须来自日报条目或原始链接检索结果；若未读取到日报，说明暂时没有读到，不要编造。
+                5. 可以附上日报条目的来源链接。
+                """);
+        save(daily);
     }
 }

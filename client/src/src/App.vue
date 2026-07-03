@@ -71,6 +71,12 @@
           <button @click="openSettings" class="text-xs border border-gray-300 dark:border-gray-600 rounded-md py-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition">
             ⚙️ 设置
           </button>
+          <button @click="showMemories = true" class="text-xs border border-gray-300 dark:border-gray-600 rounded-md py-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition" title="管理已保存记忆">
+            🧠 记忆
+          </button>
+          <button @click="showLive2dControls = true" class="text-xs border border-gray-300 dark:border-gray-600 rounded-md py-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition" title="Live2D 动作与表情">
+            🎭 Live2D
+          </button>
           <button @click="showExtensions = true" class="text-xs border border-gray-300 dark:border-gray-600 rounded-md py-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition" title="管理 MCP 服务器与技能">
             🧩 扩展
           </button>
@@ -246,10 +252,21 @@
   <SettingsModal 
     :show="showSettings"
     :initial-settings="settings"
-    :current-role-id="selectedRole?.id || null"
     @close="showSettings = false"
     @save="handleSettingsSave"
     ref="settingsModal"
+  />
+
+  <MemoryManagerModal
+    :show="showMemories"
+    :memos-enabled="settings.memosEnabled"
+    :current-role-id="selectedRole?.id || null"
+    @close="showMemories = false"
+  />
+
+  <Live2DControlModal
+    :show="showLive2dControls"
+    @close="showLive2dControls = false"
   />
 
   <LogViewerModal
@@ -277,6 +294,8 @@
 import { ref, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import SettingsModal from './components/SettingsModal.vue'
+import MemoryManagerModal from './components/MemoryManagerModal.vue'
+import Live2DControlModal from './components/Live2DControlModal.vue'
 import LogViewerModal from './components/LogViewerModal.vue'
 import McpSkillManager from './components/McpSkillManager.vue'
 import RoleCardSelector from './components/RoleCardSelector.vue'
@@ -365,6 +384,8 @@ const showSettings = ref(false)
 const showSetupWizard = ref(false)
 const showExtensions = ref(false)
 const showLogs = ref(false)
+const showMemories = ref(false)
+const showLive2dControls = ref(false)
 const isElectron = !!window.electronAPI
 const showRoleSelector = ref(false)
 const settings = ref({ ...DEFAULT_SETTINGS })

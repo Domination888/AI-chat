@@ -37,6 +37,28 @@ public class MemoryController {
         return ResponseEntity.ok(resp);
     }
 
+    @DeleteMapping
+    public ResponseEntity<Map<String, Object>> deleteBatch(@RequestParam(required = false) Integer roleId,
+                                                          @RequestBody DeleteRequest request) {
+        if (request == null || request.memoryIds() == null || request.memoryIds().isEmpty()) {
+            throw new IllegalArgumentException("memoryIds 不能为空");
+        }
+        List<String> memoryIds = request.memoryIds().stream()
+                .filter(StringUtils::hasText)
+                .distinct()
+                .toList();
+        if (memoryIds.isEmpty()) {
+            throw new IllegalArgumentException("memoryIds 不能为空");
+        }
+        String userId = memosProperties.getEffectiveUserId();
+        boolean deleted = memosClient.deleteManagedMemories(memoryIds, userId, roleId);
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("success", deleted);
+        resp.put("memoryIds", memoryIds);
+        resp.put("count", memoryIds.size());
+        return ResponseEntity.ok(resp);
+    }
+
     @DeleteMapping("/{memoryId}")
     public ResponseEntity<Map<String, Object>> delete(@PathVariable String memoryId,
                                                       @RequestParam(required = false) Integer roleId) {
@@ -70,4 +92,5 @@ public class MemoryController {
     }
 
     public record FeedbackRequest(String feedback) {}
+    public record DeleteRequest(List<String> memoryIds) {}
 }

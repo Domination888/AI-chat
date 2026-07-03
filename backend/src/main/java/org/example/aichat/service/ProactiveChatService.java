@@ -229,16 +229,21 @@ public class ProactiveChatService {
      */
     private void doProactiveChat(String conversationId, ProactiveRegistration reg,
                                   Sinks.Many<ServerSentEvent<String>> proactiveSink) {
+        // 递进式主动搭话计数，用于选择不同提示模板
+        int count = proactiveCount.merge(conversationId, 1, Integer::sum);
+        String proactivePrompt = buildDiversePrompt(reg.proactivePrompt, count);
+        doProactiveChatWithPrompt(conversationId, reg, proactiveSink, proactivePrompt, "AI 主动搭话");
+    }
+
+    private void doProactiveChatWithPrompt(String conversationId, ProactiveRegistration reg,
+                                           Sinks.Many<ServerSentEvent<String>> proactiveSink,
+                                           String proactivePrompt, String eventMessage) {
         AtomicBoolean generating = proactiveGenerating.get(conversationId);
         if (generating == null) return;
         generating.set(true);
 
         AtomicBoolean cancelFlag = proactiveCancelFlags.get(conversationId);
         if (cancelFlag != null) cancelFlag.set(false);
-
-        // 递进式主动搭话计数，用于选择不同提示模板
-        int count = proactiveCount.merge(conversationId, 1, Integer::sum);
-        String proactivePrompt = buildDiversePrompt(reg.proactivePrompt, count);
 
         // 获取角色信息以配置TTS参数
         String voiceId = null;
@@ -275,7 +280,7 @@ public class ProactiveChatService {
         request.setLatencyTrace(trace);
 
         // 推送 proactive 标记事件
-        proactiveSink.tryEmitNext(sse("proactive", jsonVal("message", "AI 主动搭话")));
+        proactiveSink.tryEmitNext(sse("proactive", jsonVal("message", eventMessage)));
 
         // 使用类似ChatController的完整流程：LLM流式 + 情绪标签处理 + TTS
         startLlmStreamWithTts(request, proactiveSink);
@@ -705,6 +710,41 @@ public class ProactiveChatService {
     }
 
     /**
+     * 由定时/外部 skill 触发一个主动话题。只投递给当前活跃会话：
+     * 已注册主动搭话、有前端 SSE 监听，且最近交互时间最新。
+     */
+    public boolean triggerTopicForCurrent(ProactiveTopic topic) {
+        if (topic == null || topic.prompt() == null || topic.prompt().isBlank()) {
+            return false;
+        }
+        String conversationId = registrations.keySet().stream()
+                .filter(id -> {
+                    Sinks.Many<ServerSentEvent<String>> sink = proactiveSinks.get(id);
+                    return sink != null && sink.currentSubscriberCount() > 0;
+                })
+                .max((a, b) -> Long.compare(
+                        lastInteractionTimes.getOrDefault(a, 0L),
+                        lastInteractionTimes.getOrDefault(b, 0L)))
+                .orElse(null);
+        if (conversationId == null) return false;
+
+        ProactiveRegistration reg = registrations.get(conversationId);
+        if (reg == null) return false;
+        if (sinkRegistry.hasActiveSink(conversationId)) return false;
+
+        AtomicBoolean generating = proactiveGenerating.get(conversationId);
+        if (generating != null && generating.get()) return false;
+
+        Sinks.Many<ServerSentEvent<String>> proactiveSink = proactiveSinks.get(conversationId);
+        if (proactiveSink == null) return false;
+
+        log.info("ProactiveChatService: skill {} 触发主动话题, conversationId={}, title={}",
+                topic.sourceSkill(), conversationId, abbr(topic.title()));
+        doProactiveChatWithPrompt(conversationId, reg, proactiveSink, topic.prompt(), "AI 日报话题");
+        return true;
+    }
+
+    /**
      * 判断指定对话是否已注册主动搭话。
      */
     public boolean isRegistered(String conversationId) {
@@ -726,5 +766,8 @@ public class ProactiveChatService {
             this.idleSeconds = idleSeconds;
             this.proactivePrompt = proactivePrompt;
         }
+    }
+
+    public record ProactiveTopic(String sourceSkill, String title, String summary, List<String> links, String prompt) {
     }
 }

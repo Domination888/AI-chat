@@ -206,63 +206,6 @@
                 技能记忆
               </label>
             </div>
-            <div class="border-t dark:border-gray-700 pt-3">
-              <div class="flex items-center justify-between mb-2">
-                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">已保存记忆</span>
-                <button
-                  type="button"
-                  @click="loadMemories"
-                  :disabled="memoryLoading || !form.memosEnabled"
-                  class="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 dark:text-gray-300 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition disabled:opacity-50"
-                >
-                  {{ memoryLoading ? '刷新中...' : '刷新' }}
-                </button>
-              </div>
-              <div v-if="memoryError" class="text-xs text-red-500 dark:text-red-400 mb-2">{{ memoryError }}</div>
-              <div v-if="!form.memosEnabled" class="text-xs text-gray-500 dark:text-gray-400">Memos 未启用</div>
-              <div v-else-if="!memoryLoading && memories.length === 0" class="text-xs text-gray-500 dark:text-gray-400">暂无可显示记忆</div>
-              <div v-else class="space-y-2 max-h-56 overflow-y-auto pr-1">
-                <div
-                  v-for="memory in memories"
-                  :key="memory.id"
-                  class="rounded-md border border-gray-200 dark:border-gray-700 p-2 bg-gray-50 dark:bg-gray-900/30"
-                >
-                  <div class="flex items-start justify-between gap-2">
-                    <div class="min-w-0">
-                      <div class="text-sm text-gray-800 dark:text-gray-100 break-words">{{ memory.text }}</div>
-                      <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                        {{ formatMemoryType(memory.type) }}
-                        <span v-if="memory.sessionId"> · {{ memory.sessionId }}</span>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      @click="deleteMemory(memory)"
-                      :disabled="memoryDeletingId === memory.id"
-                      class="shrink-0 px-2 py-1 text-xs text-red-600 border border-red-200 rounded-md hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/40 transition disabled:opacity-50"
-                    >
-                      {{ memoryDeletingId === memory.id ? '删除中' : '删除' }}
-                    </button>
-                  </div>
-                  <div class="mt-2 flex gap-2">
-                    <input
-                      v-model="memoryFeedback[memory.id]"
-                      type="text"
-                      placeholder="修正这条记忆..."
-                      class="min-w-0 flex-1 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-md"
-                    />
-                    <button
-                      type="button"
-                      @click="feedbackMemory(memory)"
-                      :disabled="memoryFeedbackId === memory.id || !memoryFeedback[memory.id]"
-                      class="shrink-0 px-2 py-1 text-xs text-blue-600 border border-blue-200 rounded-md hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-950/40 transition disabled:opacity-50"
-                    >
-                      {{ memoryFeedbackId === memory.id ? '提交中' : '纠错' }}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
 
@@ -289,61 +232,6 @@
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">搭话提示词</label>
               <textarea v-model="form.proactivePrompt" rows="2"
                 class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-md text-sm resize-none"></textarea>
-            </div>
-          </div>
-        </div>
-
-        <!-- Live2D -->
-        <div class="border dark:border-gray-700 rounded-lg p-3">
-          <h4 class="font-semibold dark:text-gray-100 mb-3">Live2D</h4>
-          <div class="space-y-4">
-            <div>
-              <div class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">动作</div>
-              <div class="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                <button
-                  v-for="motion in allLive2dMotions"
-                  :key="`${motion.group}-${motion.index}`"
-                  type="button"
-                  @click="playLive2dMotion(motion)"
-                  class="px-3 py-2 text-xs border border-gray-300 dark:border-gray-600 dark:text-gray-300 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition"
-                >
-                  {{ motion.name }}
-                </button>
-              </div>
-            </div>
-            <div>
-              <div class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">表情</div>
-              <div class="grid grid-cols-3 sm:grid-cols-5 gap-2">
-                <button
-                  v-for="expression in allLive2dExpressions"
-                  :key="expression"
-                  type="button"
-                  @click="playLive2dExpression(expression)"
-                  class="px-3 py-2 text-xs border border-gray-300 dark:border-gray-600 dark:text-gray-300 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition"
-                >
-                  {{ expression }}
-                </button>
-                <button
-                  type="button"
-                  @click="resetLive2dExpression"
-                  class="px-3 py-2 text-xs border border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-300 rounded-md hover:bg-amber-50 dark:hover:bg-amber-950/40 transition"
-                >
-                  重置
-                </button>
-              </div>
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">模型大小</label>
-              <input
-                v-model.number="live2dScale"
-                type="range"
-                min="0.3"
-                max="2.0"
-                step="0.05"
-                class="w-full"
-                @input="setLive2dScale"
-              />
-              <div class="text-xs text-gray-500 dark:text-gray-400 text-center">{{ live2dScale.toFixed(2) }}x</div>
             </div>
           </div>
         </div>
@@ -398,26 +286,16 @@ import {
   runtimeConfigToSettings,
   saveRuntimeConfig
 } from '../utils/runtimeConfig.js'
-import { apiFetch } from '../utils/api.js'
-import { allLive2dExpressions, allLive2dMotions } from '../live2d/live2d-options.js'
 
 const props = defineProps({
   show: { type: Boolean, default: false },
-  initialSettings: { type: Object, default: () => ({}) },
-  currentRoleId: { type: [Number, String], default: null }
+  initialSettings: { type: Object, default: () => ({}) }
 })
 
 const emit = defineEmits(['close', 'save'])
 
 const form = reactive({ ...DEFAULT_SETTINGS })
 const saving = ref(false)
-const memories = ref([])
-const memoryLoading = ref(false)
-const memoryDeletingId = ref('')
-const memoryFeedbackId = ref('')
-const memoryError = ref('')
-const memoryFeedback = reactive({})
-const live2dScale = ref(1.0)
 
 const PROACTIVE_IDLE_STEP = 1800
 const PROACTIVE_IDLE_DEFAULT = 3600
@@ -447,28 +325,6 @@ const selectRecentLlmModel = (model) => {
   form.llmStreamingModelName = model.streamingModelName || model.modelName
 }
 
-const sendLive2dControl = (action, data = null) => {
-  if (window.electronAPI?.live2dControl) {
-    window.electronAPI.live2dControl(action, data)
-  }
-}
-
-const playLive2dMotion = (motion) => {
-  sendLive2dControl('motion', motion)
-}
-
-const playLive2dExpression = (name) => {
-  sendLive2dControl('expression', { name })
-}
-
-const resetLive2dExpression = () => {
-  sendLive2dControl('reset')
-}
-
-const setLive2dScale = () => {
-  sendLive2dControl('scale', { scale: live2dScale.value })
-}
-
 const applyForm = (settings) => {
   Object.assign(form, { ...DEFAULT_SETTINGS, ...settings })
   form.proactiveIdleSeconds = normalizeProactiveIdleSeconds(form.proactiveIdleSeconds)
@@ -485,97 +341,8 @@ const loadSettings = async () => {
   darkModeSnapshot = form.darkMode
 }
 
-const memoryTypeLabels = {
-  USER: '用户事实',
-  LONG_TERM: '长期记忆',
-  WORKING: '工作记忆',
-  PREFERENCE: '偏好记忆',
-  UNKNOWN: '未知类型'
-}
-
-const formatMemoryType = (type) => memoryTypeLabels[type] || type || '未知类型'
-
-const memoryQuery = () => {
-  const params = new URLSearchParams()
-  if (props.currentRoleId !== null && props.currentRoleId !== undefined && props.currentRoleId !== '') {
-    params.set('roleId', String(props.currentRoleId))
-  }
-  const query = params.toString()
-  return query ? `?${query}` : ''
-}
-
-const loadMemories = async () => {
-  if (!form.memosEnabled) return
-  memoryLoading.value = true
-  memoryError.value = ''
-  try {
-    const res = await apiFetch(`/api/memories${memoryQuery()}`)
-    const data = await res.json()
-    memories.value = Array.isArray(data.items) ? data.items : []
-  } catch (e) {
-    console.error(e)
-    memoryError.value = e?.message || '加载记忆失败'
-  } finally {
-    memoryLoading.value = false
-  }
-}
-
-const deleteMemory = async (memory) => {
-  if (!memory?.id) return
-  if (!window.confirm(`确定删除这条记忆吗？\n\n${memory.text}`)) return
-  memoryDeletingId.value = memory.id
-  memoryError.value = ''
-  try {
-    const res = await apiFetch(`/api/memories/${encodeURIComponent(memory.id)}${memoryQuery()}`, {
-      method: 'DELETE'
-    })
-    const data = await res.json()
-    if (!data.success) {
-      throw new Error('删除记忆失败')
-    }
-    memories.value = memories.value.filter(item => item.id !== memory.id)
-    ElMessage.success('记忆已删除')
-  } catch (e) {
-    console.error(e)
-    memoryError.value = e?.message || '删除记忆失败'
-    ElMessage.error(memoryError.value)
-  } finally {
-    memoryDeletingId.value = ''
-  }
-}
-
-const feedbackMemory = async (memory) => {
-  const feedback = memoryFeedback[memory?.id]?.trim()
-  if (!memory?.id || !feedback) return
-  memoryFeedbackId.value = memory.id
-  memoryError.value = ''
-  try {
-    const res = await apiFetch(`/api/memories/${encodeURIComponent(memory.id)}/feedback${memoryQuery()}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ feedback })
-    })
-    const data = await res.json()
-    if (!data.success) {
-      throw new Error('提交记忆纠错失败')
-    }
-    memoryFeedback[memory.id] = ''
-    ElMessage.success('记忆纠错已提交')
-    await loadMemories()
-  } catch (e) {
-    console.error(e)
-    memoryError.value = e?.message || '提交记忆纠错失败'
-    ElMessage.error(memoryError.value)
-  } finally {
-    memoryFeedbackId.value = ''
-  }
-}
-
 onMounted(async () => {
   await loadSettings()
-  if (props.show) {
-    await loadMemories()
-  }
 })
 
 watch(() => props.show, (newVal, oldVal) => {
@@ -584,7 +351,7 @@ watch(() => props.show, (newVal, oldVal) => {
     document.documentElement.classList.toggle('dark', darkModeSnapshot)
   }
   if (newVal) {
-    loadSettings().then(loadMemories)
+    loadSettings()
     darkModeSnapshot = form.darkMode
   }
 })

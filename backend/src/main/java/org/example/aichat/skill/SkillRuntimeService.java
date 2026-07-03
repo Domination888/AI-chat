@@ -19,6 +19,7 @@ import java.util.Optional;
 public class SkillRuntimeService {
 
     private final SkillService skillService;
+    private final AiDailySkillService aiDailySkillService;
 
     public record PreInjection(String blockTitle, String body, String tailHint, String logTag) {
     }
@@ -29,6 +30,19 @@ public class SkillRuntimeService {
         List<SkillManifest> enabled = skillService.enabledSkills();
         if (enabled.isEmpty() || message == null) {
             return Optional.empty();
+        }
+
+        if (aiDailySkillService.isEnabled() && aiDailySkillService.matchesDailyQuestionOrFollowUp(message, history)) {
+            Optional<String> body = aiDailySkillService.buildNewsInjection(message, history, mcp);
+            if (body.isPresent() && !body.get().isBlank()) {
+                log.info("技能 ai-daily-juya 预取成功，长度={}", body.get().length());
+                return Optional.of(new PreInjection(
+                        "【AI 日报 · 技能 ai-daily-juya】",
+                        body.get(),
+                        "请根据以上 AI 日报回答用户的今日新闻问题；只概括关键看点，可附来源链接。若内容与问题不相关，请说明日报未覆盖，不要编造。",
+                        "ai-daily-juya"));
+            }
+            log.debug("技能 ai-daily-juya 匹配但未读取到日报");
         }
 
         if (WeatherSkillHandler.isEnabled(enabled) && WeatherSkillHandler.matches(message, history)) {
@@ -51,9 +65,10 @@ public class SkillRuntimeService {
     public boolean shouldSkipGenericPreSearch(String message, List<ChatMessage> history) {
         List<SkillManifest> enabled = skillService.enabledSkills();
         if (!WeatherSkillHandler.isEnabled(enabled)) {
-            return false;
+            return aiDailySkillService.isEnabled() && aiDailySkillService.matchesDailyQuestionOrFollowUp(message, history);
         }
-        return WeatherSkillHandler.matches(message, history);
+        return WeatherSkillHandler.matches(message, history)
+                || (aiDailySkillService.isEnabled() && aiDailySkillService.matchesDailyQuestionOrFollowUp(message, history));
     }
 
     public Optional<PreInjection> tryGenericWebPreSearch(String message, boolean supplementWebSearch,
