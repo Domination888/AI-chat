@@ -65,16 +65,14 @@ if [ -f "$PID_FILE" ]; then
     rm -f "$PID_FILE"
 fi
 
-# 2) 按端口兜底杀进程（防止 PID 漂移、wrapper 残留）
+# 2) 只检查端口占用，不按端口杀未知进程。
 # TTS 已迁移到 Win (Astra :5000)，Mac 端不再有本地 TTS 服务
 ports=(8080 3000 9000)
 for port in "${ports[@]}"; do
     pids=$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null)
     if [ -n "$pids" ]; then
-        echo "🔍 Killing processes on port $port: $pids"
-        for p in $pids; do
-            kill_tree "$p"
-        done
+        echo "⚠️  Port $port is still in use by PID(s): $pids"
+        echo "   Not killing by port. Check unified-logs/pids or stop it manually if needed."
     fi
 done
 

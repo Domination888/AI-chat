@@ -3,7 +3,6 @@ package org.example.aichat.config;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.example.aichat.service.RagService;
 import org.example.aichat.service.impl.VoiceServiceImpl;
 import org.example.aichat.service.memos.MemosClient;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -27,7 +26,6 @@ public class RuntimeConfigService {
     private final EmbeddingModelHolder embeddingModelHolder;
     private final VoiceServiceImpl voiceService;
     private final MemosClient memosClient;
-    private final RagService ragService;
 
     private RuntimeConfig ymlSnapshot;
     private RuntimeConfig.ClientSection clientSection = new RuntimeConfig.ClientSection();
@@ -120,9 +118,6 @@ public class RuntimeConfigService {
     }
 
     private void applyMerge(RuntimeConfig cfg, boolean refreshClients) {
-        String oldEmbeddingBaseUrl = embeddingProperties.getBaseUrl();
-        String oldEmbeddingModelName = embeddingProperties.getModelName();
-
         if (cfg.getLlm() != null) {
             applyLlm(cfg.getLlm());
         }
@@ -140,31 +135,7 @@ public class RuntimeConfigService {
             voiceService.refreshAsrClient();
             memosClient.refreshClient();
             log.info("运行时配置已热更新");
-
-            if (embeddingChanged(oldEmbeddingBaseUrl, oldEmbeddingModelName)) {
-                triggerRagReloadAfterEmbeddingChange(oldEmbeddingBaseUrl, oldEmbeddingModelName);
-            }
         }
-    }
-
-    private boolean embeddingChanged(String oldBaseUrl, String oldModelName) {
-        return !java.util.Objects.equals(oldBaseUrl, embeddingProperties.getBaseUrl())
-                || !java.util.Objects.equals(oldModelName, embeddingProperties.getModelName());
-    }
-
-    private void triggerRagReloadAfterEmbeddingChange(String oldBaseUrl, String oldModelName) {
-        String newBaseUrl = embeddingProperties.getBaseUrl();
-        String newModelName = embeddingProperties.getModelName();
-        log.info("Embedding 配置已变化，触发 RAG 异步重建: {} / {} -> {} / {}",
-                oldBaseUrl, oldModelName, newBaseUrl, newModelName);
-        java.util.concurrent.CompletableFuture.runAsync(() -> {
-            try {
-                int chunkCount = ragService.reload();
-                log.info("Embedding 变更后的 RAG 重建完成，分块数: {}", chunkCount);
-            } catch (Exception e) {
-                log.error("Embedding 变更后的 RAG 重建失败，保留旧索引: {}", e.getMessage(), e);
-            }
-        });
     }
 
     private void applyLlm(RuntimeConfig.LlmSection s) {
@@ -191,7 +162,7 @@ public class RuntimeConfigService {
         if (StringUtils.hasText(s.getAstraTtsBaseUrl())) {
             voiceProperties.setAstraTtsBaseUrl(s.getAstraTtsBaseUrl().trim());
         }
-        if (StringUtils.hasText(s.getAstraDefaultAvatarId())) {
+        if (s.getAstraDefaultAvatarId() != null) {
             voiceProperties.setAstraDefaultAvatarId(s.getAstraDefaultAvatarId().trim());
         }
         if (s.getAstraStreamingChunkSize() != null) {

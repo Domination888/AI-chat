@@ -170,6 +170,7 @@ public class McpClientManager {
         StringBuilder sb = new StringBuilder();
         sb.append("【MCP 工具目录】\n");
         sb.append("下列工具已通过 MCP 注册，可直接调用；无对应技能说明时，仍应主动选用合适工具，不要心算或编造结果。\n");
+        sb.append("涉及最新/当前/今天/价格/新闻/公告/版本/政策/赛程/网址/下载/论文/统计数据等外部事实时，优先调用 webSearch 或使用已注入的联网搜索结果；回答必须引用来源 URL，搜索结果无关时要说明未查到。\n");
         for (ToolSpecification spec : tools) {
             sb.append("- `").append(spec.name()).append("`");
             if (spec.description() != null && !spec.description().isBlank()) {

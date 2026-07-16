@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.example.aichat.service.RagService;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -20,6 +21,15 @@ public class RagController {
 
     @GetMapping("/reload")
     public Map<String, Object> reload() {
+        return doReload();
+    }
+
+    @PostMapping("/reload")
+    public Map<String, Object> reloadByPost() {
+        return doReload();
+    }
+
+    private Map<String, Object> doReload() {
         int chunkCount = ragService.reload();
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("success", true);

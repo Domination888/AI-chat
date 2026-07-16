@@ -266,7 +266,7 @@ def evaluate(args: argparse.Namespace) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:1234/v1")
-    parser.add_argument("--model", default="qwen3-embedding-4b-dwq")
+    parser.add_argument("--model", default="text-embedding-qwen3-embedding-4b")
     parser.add_argument("--redis-key", default="rag:chunks:embeds")
     parser.add_argument("--role-prefix", default="shu_")
     parser.add_argument("--top-k", type=int, default=5)

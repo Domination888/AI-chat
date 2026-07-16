@@ -10,7 +10,7 @@ import java.util.Map;
 /**
  * voice.* 配置统一映射。
  *
- * TTS 引擎已切换为 Astra（Genie-TTS，部署在 Win :5000），
+ * TTS 引擎已切换为 Astra（Genie-TTS / AstraTTS），
  * 采样率 32000Hz，通过 avatarId 选择音色。
  */
 @Data
@@ -23,13 +23,13 @@ public class VoiceProperties {
     private String asrLanguage = "auto";
     private int asrTimeoutMs = 15000;
 
-    // -------- TTS (Astra / Genie-TTS on Win :5000) --------
+    // -------- TTS (Astra / Genie-TTS / AstraTTS) --------
     /** TTS 引擎：astra（唯一选项） */
     private String ttsEngine = "astra";
     /** Astra TTS 服务基础 URL */
     private String astraTtsBaseUrl;
     /** Astra 默认 avatarId（兜底音色） */
-    private String astraDefaultAvatarId = "chenxing";
+    private String astraDefaultAvatarId = "";
     /** Astra 流式分片大小（predict-stream chunkSize 参数） */
     private int astraStreamingChunkSize = 2048;
     private int ttsTimeoutMs = 60000;

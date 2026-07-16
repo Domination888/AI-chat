@@ -4,6 +4,9 @@ import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.Content;
+import dev.langchain4j.data.message.ImageContent;
+import dev.langchain4j.data.message.TextContent;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.memory.ChatMemory;
@@ -303,20 +306,23 @@ public class ChatServiceImpl implements ChatService {
         // MCP 工具调用（默认开；Gemma4 原生支持）：聚合所有已启用 MCP 服务器的工具（含 SearXNG webSearch）
         List<ToolSpecification> localToolSpecs = useTools ? getMcpToolSpecs() : List.of();
 
+        allMessages = normalizeMessagesForChatTemplate(allMessages);
         log.debug("发送消息列表大小: {}, conversationId: {}", allMessages.size(), conversationId);
+        validateMessagesBeforeLlm(conversationId, allMessages);
 
         final List<ChatMessage> finalMessages = allMessages;
         final Integer finalUserId = userId;
         final Integer finalRoleId = roleId;
         final StreamingChatModel finalCurrentStreamingChatModel = currentStreamingChatModel;
         final LatencyTrace finalTrace = trace;
+        final String finalStreamId = request.getStreamId();
         if (finalTrace != null) finalTrace.mark("llm_prompt_ready");
 
         return Flux.create(sink -> {
             AtomicBoolean llmFirstToken = new AtomicBoolean(false);
             doStreamToolLoop(finalMessages, localToolSpecs, chatMemory, conversationId,
                     finalUserId, finalRoleId, sink, new StringBuilder(), 1, finalCurrentStreamingChatModel,
-                    request.getMessage(), memosChatHistory, finalTrace, llmFirstToken);
+                    request.getMessage(), memosChatHistory, finalTrace, llmFirstToken, finalStreamId);
         });
     }
 
@@ -333,7 +339,8 @@ public class ChatServiceImpl implements ChatService {
                                   String originalUserMessage,
                                   List<Map<String, String>> memosChatHistory,
                                   LatencyTrace trace,
-                                  AtomicBoolean llmFirstToken) {
+                                  AtomicBoolean llmFirstToken,
+                                  String streamId) {
 
         dev.langchain4j.model.chat.request.ChatRequest.Builder reqBuilder =
                 dev.langchain4j.model.chat.request.ChatRequest.builder()
@@ -356,7 +363,7 @@ public class ChatServiceImpl implements ChatService {
             @Override
             public void onPartialResponse(String partialResponse) {
                 // 检查取消标记：已被打断时跳过输出，不再向 sink 推数据
-                if (sinkRegistry.isCancelled(conversationId)) {
+                if (sinkRegistry.isCancelled(conversationId, streamId)) {
                     log.info("onPartialResponse: conversationId={} 已被取消，跳过", conversationId);
                     return;
                 }
@@ -369,7 +376,7 @@ public class ChatServiceImpl implements ChatService {
 
             @Override
             public void onCompleteResponse(ChatResponse completeResponse) {
-                boolean cancelled = sinkRegistry.isCancelled(conversationId);
+                boolean cancelled = sinkRegistry.isCancelled(conversationId, streamId);
                 if (cancelled) {
                     log.info("onCompleteResponse: conversationId={} 已被取消", conversationId);
                 }
@@ -395,7 +402,7 @@ public class ChatServiceImpl implements ChatService {
                     if (trace != null) trace.mark("tool_round_" + round + "_done");
                     doStreamToolLoop(messages, toolSpecs, chatMemory, conversationId,
                             userId, roleId, sink, fullResponse, round + 1, currentStreamingChatModel, originalUserMessage,
-                            memosChatHistory, trace, llmFirstToken);
+                            memosChatHistory, trace, llmFirstToken, streamId);
                 } else if (!cancelled && fullResponse.length() > 0) {
                     String normalized = normalizeEmotionTags(fullResponse.toString());
                     chatMemory.add(AiMessage.from(normalized));
@@ -428,6 +435,87 @@ public class ChatServiceImpl implements ChatService {
         }
         log.warn("请求 roleId={} 不存在于 role_card，Memos/RAG 回退 roleId=1", roleId);
         return 1;
+    }
+
+    private void validateMessagesBeforeLlm(String conversationId, List<ChatMessage> messages) {
+        if (messages == null || messages.isEmpty()) {
+            throw new IllegalStateException("LLM 请求 messages 为空, conversationId=" + conversationId);
+        }
+        boolean hasUserQuery = messages.stream().anyMatch(this::isNonEmptyUserMessage);
+        if (!hasUserQuery) {
+            log.error("LLM 请求缺少非空 user 消息, conversationId={}, messageTypes={}",
+                    conversationId, messages.stream().map(m -> m.getClass().getSimpleName()).toList());
+            throw new IllegalStateException("LLM 请求缺少非空 user 消息，请检查消息裁剪/并发发送逻辑");
+        }
+    }
+
+    private boolean isNonEmptyUserMessage(ChatMessage message) {
+        if (!(message instanceof UserMessage userMessage)) {
+            return false;
+        }
+        if (userMessage.hasSingleText()) {
+            return userMessage.singleText() != null && !userMessage.singleText().isBlank();
+        }
+        if (userMessage.contents() == null) {
+            return false;
+        }
+        return userMessage.contents().stream().anyMatch(content -> {
+            if (content instanceof TextContent textContent) {
+                return textContent.text() != null && !textContent.text().isBlank();
+            }
+            return content instanceof ImageContent;
+        });
+    }
+
+    private List<ChatMessage> normalizeMessagesForChatTemplate(List<ChatMessage> messages) {
+        if (messages == null || messages.isEmpty()) {
+            return messages;
+        }
+        List<ChatMessage> normalized = new ArrayList<>();
+        for (ChatMessage message : messages) {
+            if (message instanceof UserMessage userMessage
+                    && !normalized.isEmpty()
+                    && normalized.get(normalized.size() - 1) instanceof UserMessage previousUser) {
+                normalized.set(normalized.size() - 1, mergeUserMessages(previousUser, userMessage));
+            } else {
+                normalized.add(message);
+            }
+        }
+        return normalized;
+    }
+
+    private UserMessage mergeUserMessages(UserMessage first, UserMessage second) {
+        if (first.hasSingleText() && second.hasSingleText()) {
+            return UserMessage.from(joinUserText(first.singleText(), second.singleText()));
+        }
+
+        List<Content> contents = new ArrayList<>();
+        appendUserContents(contents, first);
+        contents.add(TextContent.from("\n\n"));
+        appendUserContents(contents, second);
+        return UserMessage.from(contents);
+    }
+
+    private String joinUserText(String first, String second) {
+        String left = first == null ? "" : first.stripTrailing();
+        String right = second == null ? "" : second.stripLeading();
+        if (left.isBlank()) {
+            return right;
+        }
+        if (right.isBlank()) {
+            return left;
+        }
+        return left + "\n\n" + right;
+    }
+
+    private void appendUserContents(List<Content> out, UserMessage message) {
+        if (message.hasSingleText()) {
+            out.add(TextContent.from(message.singleText() == null ? "" : message.singleText()));
+            return;
+        }
+        if (message.contents() != null) {
+            out.addAll(message.contents());
+        }
     }
 
     private void enqueueConversationTurnToMemos(String conversationId, Integer userId, Integer roleId,

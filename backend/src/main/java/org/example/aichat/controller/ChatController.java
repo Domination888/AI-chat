@@ -81,8 +81,9 @@ public class ChatController {
         Sinks.Many<ServerSentEvent<String>> sink = Sinks.many().unicast().onBackpressureBuffer();
         String conversationId = request.getConversationId();
 
-        // 注册 sink 到全局注册表（支持打断 + 主动搭话）
-        sinkRegistry.register(conversationId, sink);
+        // 注册 sink 到全局注册表（支持打断 + 主动搭话），并把本次流 ID 传给下游 LLM 回调。
+        String streamId = sinkRegistry.register(conversationId, sink);
+        request.setStreamId(streamId);
 
         // 更新主动搭话的交互时间（用户发了新消息）
         proactiveChatService.updateLastInteraction(conversationId);
@@ -96,9 +97,9 @@ public class ChatController {
         }
 
         return sink.asFlux()
-                .doOnComplete(() -> sinkRegistry.unregister(conversationId))
-                .doOnError(err -> sinkRegistry.unregister(conversationId))
-                .doOnCancel(() -> sinkRegistry.unregister(conversationId));
+                .doOnComplete(() -> sinkRegistry.unregister(conversationId, streamId))
+                .doOnError(err -> sinkRegistry.unregister(conversationId, streamId))
+                .doOnCancel(() -> sinkRegistry.unregister(conversationId, streamId));
     }
 
     @PostMapping("/interrupt")
@@ -409,7 +410,7 @@ public class ChatController {
                 .subscribeOn(Schedulers.boundedElastic())
                 .doOnNext(token -> {
                     // 检查取消标记：如果已被打断，跳过后续 token
-                    if (sinkRegistry.isCancelled(conversationId)) {
+                    if (sinkRegistry.isCancelled(conversationId, request.getStreamId())) {
                         log.info("startLlmStreamWithTts: conversationId={} 已被取消，跳过 token", conversationId);
                         return;
                     }

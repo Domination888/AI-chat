@@ -428,15 +428,25 @@ const logout = () => {
 }
 
 const loadRoles = async () => {
-  try {
-    const res = await apiFetch('/api/roles')
-    const data = await res.json()
-    roles.value = data || []
-    if (roles.value.length > 0 && !selectedRole.value) {
-      selectedRole.value = findDefaultRole(roles.value)
+  const maxAttempts = 12
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await apiFetch('/api/roles')
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      if (!Array.isArray(data)) throw new Error('角色列表格式错误')
+      roles.value = data
+      if (roles.value.length > 0 && !selectedRole.value) {
+        selectedRole.value = findDefaultRole(roles.value)
+      }
+      return
+    } catch (e) {
+      if (attempt === maxAttempts) {
+        console.error('加载角色失败', e)
+        return
+      }
+      await new Promise(resolve => setTimeout(resolve, 1000))
     }
-  } catch (e) {
-    console.error('加载角色失败', e)
   }
 }
 
@@ -462,6 +472,10 @@ const loadConversations = async () => {
 }
 
 const selectConversation = async (id) => {
+  if (loading.value) await abortCurrentChat()
+  else stopCurrentAudio()
+  chatRequestSeq++
+  loading.value = false
   // 切换会话前先注销旧的 proactive
   await unregisterProactiveChat()
   currentConversationId.value = id
@@ -483,6 +497,10 @@ const selectConversation = async (id) => {
 }
 
 const newChat = async () => {
+  if (loading.value) await abortCurrentChat()
+  else stopCurrentAudio()
+  chatRequestSeq++
+  loading.value = false
   await unregisterProactiveChat()
   currentConversationId.value = `conv_${Date.now()}`
   messages.value = []
@@ -567,6 +585,9 @@ const sendMessage = async (e) => {
   if (loading.value) {
     await abortCurrentChat()
     loading.value = false
+  } else {
+    // 主动搭话的 SSE 不会设置 loading，但它的语音同样必须被用户输入立即打断。
+    stopCurrentAudio()
   }
 
   const currentImages = [...selectedImages.value]
@@ -578,6 +599,7 @@ const sendMessage = async (e) => {
 
   const aiMsgIndex = messages.value.length
   messages.value.push({ role: 'ai', content: '' })
+  const requestSeq = ++chatRequestSeq
   loading.value = true
 
   const requestBody = {
@@ -608,7 +630,7 @@ const sendMessage = async (e) => {
       messages.value[aiMsgIndex].content = '[Error: 请求失败]'
     }
   } finally {
-    loading.value = false
+    if (chatRequestSeq === requestSeq) loading.value = false
   }
 }
 
@@ -651,10 +673,29 @@ let audioPlaying = false
 const audioUnlocked = ref(false)  // AudioContext 是否已 resume
 let audioCtx = null               // 全局唯一 AudioContext
 let currentSource = null          // 正在播放的 BufferSource（用于停止）
-const ttsBuffers = new Map()      // idx -> { chunks: Uint8Array[] }
+const ttsBuffers = new Map()      // playbackKey -> { chunks: Uint8Array[] }
 /** 流式 PCM：按 AudioContext 时间轴无缝拼接，避免 8KB 分片断档/爆音 */
-const ttsStreamPlayers = new Map() // idx -> { nextTime, carry, ... }
+const ttsStreamPlayers = new Map() // playbackKey -> { nextTime, carry, ... }
 let currentAbortController = null  // 当前 SSE 请求的 AbortController（用于打断）
+let chatRequestSeq = 0
+let ttsPlaybackSessionSeq = 0
+let ttsPlaybackGeneration = 0
+
+/**
+ * 每条 SSE 回复都有独立播放会话。后端的 idx 每次回复都会从 0 开始，
+ * 所以播放器内部不能直接拿 idx 当全局 key，否则普通回复和主动搭话会串流/重叠。
+ */
+const createTtsPlaybackSession = (latencySession = null) => ({
+  id: ++ttsPlaybackSessionSeq,
+  generation: ttsPlaybackGeneration,
+  latencySession,
+})
+
+const isTtsPlaybackSessionActive = (session) => (
+  !!session && session.generation === ttsPlaybackGeneration
+)
+
+const ttsPlaybackKey = (session, idx) => `${session.id}:${idx}`
 
 /**
  * 获取/创建全局 AudioContext。
@@ -720,32 +761,35 @@ const decodeTtsChunkBytes = (audioBase64) => {
   return bytes
 }
 
-const enqueueTtsAudio = (idx, pcm, buf) => {
+const enqueueTtsAudio = (key, idx, pcm, buf, session) => {
   audioQueue.push({
+    key,
     idx,
     pcm,
     sampleRate: buf.sampleRate,
     channels: buf.channels,
     format: buf.format,
+    session,
   })
   pumpAudioQueue()
 }
 
-const stopTtsStreamPlayer = (idx) => {
-  const player = ttsStreamPlayers.get(idx)
+const stopTtsStreamPlayer = (key) => {
+  const player = ttsStreamPlayers.get(key)
   if (!player) return
   if (player.stopTimer) clearTimeout(player.stopTimer)
   for (const src of player.activeSources) {
     try { src.stop() } catch (e) { /* already stopped */ }
   }
-  ttsStreamPlayers.delete(idx)
+  ttsStreamPlayers.delete(key)
 }
 
 /**
  * 流式 PCM：在 AudioContext 时间轴上连续 schedule，保证样本边界对齐。
  * 不可把每个 HTTP/SSE 分片当成独立 BufferSource 排队（会断档，且奇数字节会爆音）。
  */
-const feedStreamPcm = (idx, bytes, buf) => {
+const feedStreamPcm = (key, bytes, buf, session) => {
+  if (!isTtsPlaybackSessionActive(session)) return
   const ctx = getAudioCtx()
   if (!ctx) return
   if (ctx.state !== 'running') return
@@ -753,7 +797,7 @@ const feedStreamPcm = (idx, bytes, buf) => {
   const isF32 = buf.format === 'pcm_f32le'
   const alignBytes = isF32 ? 4 : 2  // float32=4字节对齐, int16=2字节对齐
 
-  let player = ttsStreamPlayers.get(idx)
+  let player = ttsStreamPlayers.get(key)
   if (!player) {
     player = {
       sampleRate: buf.sampleRate,
@@ -765,8 +809,9 @@ const feedStreamPcm = (idx, bytes, buf) => {
       lipSyncStarted: false,
       activeSources: [],
       stopTimer: null,
+      session,
     }
-    ttsStreamPlayers.set(idx, player)
+    ttsStreamPlayers.set(key, player)
   }
 
   // 拼接 carry + 新字节
@@ -818,8 +863,9 @@ const feedStreamPcm = (idx, bytes, buf) => {
   if (!player.lipSyncStarted) {
     player.lipSyncStarted = true
     live2dController.startLipSync(ctx, src)
-    if (currentLatencySession && !currentLatencySession.steps.client_first_tts_play) {
-      markLatency(currentLatencySession, 'client_first_tts_play')
+    const latencySession = session.latencySession
+    if (latencySession && !latencySession.steps.client_first_tts_play) {
+      markLatency(latencySession, 'client_first_tts_play')
     }
   }
 
@@ -829,8 +875,8 @@ const feedStreamPcm = (idx, bytes, buf) => {
   }
 }
 
-const finishTtsStreamPlayer = (idx) => {
-  const player = ttsStreamPlayers.get(idx)
+const finishTtsStreamPlayer = (key) => {
+  const player = ttsStreamPlayers.get(key)
   if (!player) return
   if (player.carry !== null && player.carryLen > 0) {
     // 补零对齐后刷出剩余字节
@@ -839,11 +885,11 @@ const finishTtsStreamPlayer = (idx) => {
     if (padLen < alignBytes) {
       const padded = new Uint8Array(player.carryLen + padLen)
       padded.set(player.carry.subarray(0, player.carryLen), 0)
-      feedStreamPcm(idx, padded, {
+      feedStreamPcm(key, padded, {
         sampleRate: player.sampleRate,
         channels: player.channels,
         format: player.format,
-      })
+      }, player.session)
     }
     player.carry = null
     player.carryLen = 0
@@ -853,11 +899,11 @@ const finishTtsStreamPlayer = (idx) => {
     ? Math.max(50, (player.nextTime - ctx.currentTime) * 1000 + 50)
     : 50
   player.stopTimer = setTimeout(() => {
-    if (ttsStreamPlayers.get(idx) === player) {
+    if (ttsStreamPlayers.get(key) === player) {
       live2dController.stopLipSync()
-      ttsStreamPlayers.delete(idx)
+      ttsStreamPlayers.delete(key)
       // 音频实际播完，通知串行队列推进下一句
-      onTtsSentenceFinished(idx)
+      onTtsSentenceFinished(key, player.session)
     }
   }, delayMs)
 }
@@ -865,15 +911,16 @@ const finishTtsStreamPlayer = (idx) => {
 // ---- TTS 句子级串行播放队列 ----
 // 同一对话中多个句子的流式 PCM 播放器必须串行排队，
 // 前一句播放结束后再开始下一句，避免多句重叠。
-const ttsSentenceQueue = []       // 排队等待播放的句子 idx
-let ttsPlayingIdx = null          // 当前正在播放的句子 idx
-const ttsSentenceReady = new Set() // 已收到 chunkEnd 但还没开始播放的句子 idx
+const ttsSentenceQueue = []        // 排队等待播放的 playbackKey
+let ttsPlayingIdx = null           // 当前正在播放的 playbackKey
+const ttsSentenceReady = new Set() // 已收到 chunkEnd 但还没开始播放的 playbackKey
 
 /**
  * 将句子 idx 加入串行队列，若当前无句子在播放则立即开始。
  */
-const enqueueTtsSentence = (idx) => {
-  ttsSentenceQueue.push(idx)
+const enqueueTtsSentence = (key) => {
+  if (ttsSentenceQueue.includes(key) || ttsPlayingIdx === key) return
+  ttsSentenceQueue.push(key)
   pumpTtsSentenceQueue()
 }
 
@@ -889,18 +936,24 @@ const pumpTtsSentenceQueue = () => {
   const pending = ttsPendingChunks.get(ttsPlayingIdx)
   if (pending) {
     ttsPendingChunks.delete(ttsPlayingIdx)
-    for (const { bytes, buf } of pending) {
-      feedStreamPcm(ttsPlayingIdx, bytes, buf)
+    for (const { bytes, buf, session } of pending) {
+      feedStreamPcm(ttsPlayingIdx, bytes, buf, session)
     }
   }
 
   // 如果该句的所有 chunks 已经到齐（chunkEnd 已到），立即结束播放
   if (ttsSentenceReady.has(ttsPlayingIdx)) {
     ttsSentenceReady.delete(ttsPlayingIdx)
-    finishTtsStreamPlayer(ttsPlayingIdx)
+    const key = ttsPlayingIdx
+    const player = ttsStreamPlayers.get(key)
+    if (player) finishTtsStreamPlayer(key)
+    else onTtsSentenceFinished(key, pending?.[0]?.session)
     // 注意：finishTtsStreamPlayer 内部的 setTimeout 会在音频播完后
     // 调用 onTtsSentenceFinished 推进下一句
   }
+
+  // 非流式格式可能已经在完整音频队列中等候。
+  pumpAudioQueue()
 }
 
 /**
@@ -908,57 +961,63 @@ const pumpTtsSentenceQueue = () => {
  * 注意：不能在 chunkEnd 时同步调用，因为此时音频还在 AudioContext 时间轴上播放。
  * 必须等到 player.nextTime 到期（即最后一个 BufferSource 播完）后再推进。
  */
-const onTtsSentenceFinished = (idx) => {
-  if (ttsPlayingIdx === idx) {
+const onTtsSentenceFinished = (key, playbackSession) => {
+  if (ttsPlayingIdx === key) {
     ttsPlayingIdx = null
     pumpTtsSentenceQueue()
   }
-  const session = currentLatencySession
+  const session = playbackSession?.latencySession
   if (session) {
-    session.playingTts.delete(idx)
+    session.playingTts.delete(key)
     markLatency(session, 'client_last_tts_play')
     tryFinishLatencySession(session)
   }
 }
 
-// 暂存因串行队列未到而延迟喂入的 PCM chunks：idx -> [{bytes, buf}]
+// 暂存因串行队列未到而延迟喂入的 PCM chunks：playbackKey -> [{bytes, buf, session}]
 const ttsPendingChunks = new Map()
 
-const handleTtsEvent = (payload) => {
+const handleTtsEvent = (payload, playbackSession) => {
+  if (!isTtsPlaybackSessionActive(playbackSession)) return
   const idx = payload.idx
+  if (idx === undefined || idx === null) return
+  const key = ttsPlaybackKey(playbackSession, idx)
   if (payload.chunkStart) {
-    ttsBuffers.set(idx, {
+    // 同一回复内重复的 chunkStart 是重放/重连数据，不能再次入队。
+    if (ttsBuffers.has(key) || ttsStreamPlayers.has(key)
+        || ttsSentenceQueue.includes(key) || ttsPlayingIdx === key) return
+    ttsBuffers.set(key, {
       sampleRate: payload.sampleRate || 48000,
       channels: payload.channels || 1,
       format: payload.format || 'pcm_s16le',
       streamPlay: !!payload.streamPlay,
       chunks: []
     })
-    if (currentLatencySession) {
-      currentLatencySession.ttsSentenceCount++
-      currentLatencySession.playingTts.add(idx)
+    const latencySession = playbackSession.latencySession
+    if (latencySession) {
+      latencySession.ttsSentenceCount++
+      latencySession.playingTts.add(key)
     }
-    // 流式句子：加入串行队列
-    if (payload.streamPlay) {
-      enqueueTtsSentence(idx)
-    }
+    // 所有格式共用同一个句子队列；否则 WAV/完整 PCM 队列会和流式 PCM 同时播放。
+    enqueueTtsSentence(key)
   }
-  const buf = ttsBuffers.get(idx)
+  const buf = ttsBuffers.get(key)
   if (!buf) return
   if (payload.audioBase64) {
     try {
       const bytes = decodeTtsChunkBytes(payload.audioBase64)
-      if (currentLatencySession && !currentLatencySession.steps.client_first_tts_chunk) {
-        markLatency(currentLatencySession, 'client_first_tts_chunk')
+      const latencySession = playbackSession.latencySession
+      if (latencySession && !latencySession.steps.client_first_tts_chunk) {
+        markLatency(latencySession, 'client_first_tts_chunk')
       }
       if (buf.streamPlay && (buf.format === 'pcm_s16le' || buf.format === 'pcm_f32le')) {
         // 串行控制：只有当前正在播放的句子才立即喂入 feedStreamPcm
-        if (ttsPlayingIdx === idx) {
-          feedStreamPcm(idx, bytes, buf)
+        if (ttsPlayingIdx === key) {
+          feedStreamPcm(key, bytes, buf, playbackSession)
         } else {
           // 还没轮到该句播放，暂存 chunks
-          if (!ttsPendingChunks.has(idx)) ttsPendingChunks.set(idx, [])
-          ttsPendingChunks.get(idx).push({ bytes, buf })
+          if (!ttsPendingChunks.has(key)) ttsPendingChunks.set(key, [])
+          ttsPendingChunks.get(key).push({ bytes, buf, session: playbackSession })
         }
       } else {
         buf.chunks.push(bytes)
@@ -970,25 +1029,32 @@ const handleTtsEvent = (payload) => {
   if (payload.chunkEnd) {
     if (buf.streamPlay) {
       // 如果该句暂存了 chunks 且当前正在播放它，一次性灌入
-      const pending = ttsPendingChunks.get(idx)
-      if (pending && ttsPlayingIdx === idx) {
-        ttsPendingChunks.delete(idx)
-        for (const { bytes, buf: b } of pending) {
-          feedStreamPcm(idx, bytes, b)
+      const pending = ttsPendingChunks.get(key)
+      if (pending && ttsPlayingIdx === key) {
+        ttsPendingChunks.delete(key)
+        for (const { bytes, buf: b, session } of pending) {
+          feedStreamPcm(key, bytes, b, session)
         }
       }
-      if (ttsPlayingIdx === idx) {
+      if (ttsPlayingIdx === key) {
         // 正在播放的句子 chunkEnd → 等音频播完后自动推进下一句
-        finishTtsStreamPlayer(idx)
+        const player = ttsStreamPlayers.get(key)
+        if (player) finishTtsStreamPlayer(key)
+        else onTtsSentenceFinished(key, playbackSession)
       } else {
         // 还没轮到播放的句子 chunkEnd → 标记已就绪，等轮到时再处理
-        ttsSentenceReady.add(idx)
+        ttsSentenceReady.add(key)
       }
-      ttsBuffers.delete(idx)
+      ttsBuffers.delete(key)
       return
     }
     if (buf.chunks.length === 0) {
-      ttsBuffers.delete(idx)
+      ttsBuffers.delete(key)
+      if (ttsPlayingIdx === key) onTtsSentenceFinished(key, playbackSession)
+      else {
+        const pos = ttsSentenceQueue.indexOf(key)
+        if (pos >= 0) ttsSentenceQueue.splice(pos, 1)
+      }
       return
     }
     let total = 0
@@ -996,8 +1062,8 @@ const handleTtsEvent = (payload) => {
     const merged = new Uint8Array(total)
     let off = 0
     for (const c of buf.chunks) { merged.set(c, off); off += c.length }
-    ttsBuffers.delete(idx)
-    enqueueTtsAudio(idx, merged, buf)
+    ttsBuffers.delete(key)
+    enqueueTtsAudio(key, idx, merged, buf, playbackSession)
   }
 }
 
@@ -1042,23 +1108,41 @@ const pumpAudioQueue = () => {
   const ctx = getAudioCtx()
   if (!ctx) return
   if (ctx.state !== 'running') return
-  const item = audioQueue.shift()
+  let item = audioQueue[0]
+  // 被打断的旧 SSE 即使晚到，也不能恢复播放。
+  while (item && !isTtsPlaybackSessionActive(item.session)) {
+    audioQueue.shift()
+    item = audioQueue[0]
+  }
   if (!item) return
+  // 完整音频也必须等全局句子队列轮到自己，不能绕过流式播放器。
+  if (ttsPlayingIdx !== item.key) return
+  audioQueue.shift()
   audioPlaying = true
   try {
     // WAV 格式：走 decodeAudioData 解码
     // pcm_s16le 格式（Astra TTS 引擎）：直接灌 AudioBuffer，零解码开销
     const decodeAndPlay = (audioBuf) => {
+      if (!isTtsPlaybackSessionActive(item.session)) {
+        audioPlaying = false
+        pumpAudioQueue()
+        return
+      }
       const src = ctx.createBufferSource()
       src.buffer = audioBuf
       src.connect(ctx.destination)
       currentSource = src
       // TTS 播放时启动 Live2D 口型同步
       live2dController.startLipSync(ctx, src)
+      const latencySession = item.session?.latencySession
+      if (latencySession && !latencySession.steps.client_first_tts_play) {
+        markLatency(latencySession, 'client_first_tts_play')
+      }
       src.onended = () => {
         currentSource = null
         audioPlaying = false
         live2dController.stopLipSync()
+        onTtsSentenceFinished(item.key, item.session)
         pumpAudioQueue()
       }
       src.start(0)
@@ -1072,6 +1156,7 @@ const pumpAudioQueue = () => {
           console.warn('WAV 解码失败 idx=' + item.idx + ':', e && e.message)
           audioPlaying = false
           live2dController.stopLipSync()
+          onTtsSentenceFinished(item.key, item.session)
           pumpAudioQueue()
         })
     } else {
@@ -1085,6 +1170,7 @@ const pumpAudioQueue = () => {
     console.warn('PCM 播放失败 idx=' + item.idx + ':', e && e.message)
     audioPlaying = false
     live2dController.stopLipSync()
+    onTtsSentenceFinished(item.key, item.session)
     pumpAudioQueue()
   }
 }
@@ -1094,6 +1180,8 @@ const pumpAudioQueue = () => {
  * 停止当前 TTS 音频播放：停止 source + 清空 audioQueue + 重置 audioPlaying
  */
 const stopCurrentAudio = () => {
+  // 先使所有已经分发出去的旧 SSE 播放会话失效，防止 stop 之后的晚到 chunk 重新出声。
+  ttsPlaybackGeneration++
   if (currentSource) {
     try { currentSource.stop() } catch (e) { /* already stopped */ }
     currentSource = null
@@ -1114,13 +1202,19 @@ const stopCurrentAudio = () => {
 
 /**
  * 打断当前正在进行的聊天（SSE 流 + TTS 播放）：
- * ① 调后端 /api/chat/interrupt 通知后端停止 LLM 生成
- * ② 用 AbortController 取消当前 fetch SSE 流
- * ③ 清空音频队列 + 停止当前播放
- * ④ 清理当前 AI 消息气泡（保留已收到文本或标记 [已打断]）
+ * ① 立即取消当前 fetch 并清空/停止本地音频
+ * ② 调后端 /api/chat/interrupt 停止 LLM/TTS 生成
+ * ③ 清理当前 AI 消息气泡（保留已收到文本或标记 [已打断]）
  */
 const abortCurrentChat = async () => {
-  // 1. 通知后端打断
+  // 1. 本地必须同步静音，不能等待后端 interrupt 的网络往返。
+  if (currentAbortController) {
+    currentAbortController.abort()
+    currentAbortController = null
+  }
+  stopCurrentAudio()
+
+  // 2. 再通知后端停止生成，避免本地等待期间旧语音继续播放。
   if (currentConversationId.value) {
     try {
       await apiFetch('/api/chat/interrupt', {
@@ -1133,16 +1227,7 @@ const abortCurrentChat = async () => {
     }
   }
 
-  // 2. 取消当前 SSE fetch
-  if (currentAbortController) {
-    currentAbortController.abort()
-    currentAbortController = null
-  }
-
-  // 3. 停止 TTS 播放 + 清空队列
-  stopCurrentAudio()
-
-  // 4. 标记当前 AI 消息为 [已打断]（仅当内容为空时）
+  // 3. 标记当前 AI 消息为 [已打断]（仅当内容为空时）
   const lastMsg = messages.value[messages.value.length - 1]
   if (lastMsg && lastMsg.role === 'ai' && !lastMsg.content) {
     lastMsg.content = '[已打断]'
@@ -1221,6 +1306,7 @@ const doChatSSE = async (requestBody, userMsgIndex, aiMsgIndex) => {
   // 用户主动发消息：保留表情/动作/口型，但不播放 Live2D 动作音效
   live2dController.setMotionSoundEnabled(false)
   const latencySession = beginLatencySession(requestBody)
+  const playbackSession = createTtsPlaybackSession(latencySession)
   // 创建 AbortController 支持请求级打断
   const controller = new AbortController()
   currentAbortController = controller
@@ -1282,7 +1368,7 @@ const doChatSSE = async (requestBody, userMsgIndex, aiMsgIndex) => {
         messages.value[aiMsgIndex].content += (payload.delta || '')
         scrollToBottom()
       } else if (evName === 'tts') {
-        handleTtsEvent(payload)
+        handleTtsEvent(payload, playbackSession)
       } else if (evName === 'error') {
         messages.value[aiMsgIndex].content += `\n[错误] ${payload.message || ''}`
       } else if (evName === 'done') {
@@ -1301,7 +1387,8 @@ const doChatSSE = async (requestBody, userMsgIndex, aiMsgIndex) => {
     }
     throw e
   } finally {
-    currentAbortController = null
+    // 旧请求的 finally 不能清掉后发请求的 AbortController。
+    if (currentAbortController === controller) currentAbortController = null
   }
 }
 
@@ -1310,7 +1397,10 @@ const sendAudio = async (audioBlob) => {
   if (loading.value) {
     await abortCurrentChat()
     loading.value = false
+  } else {
+    stopCurrentAudio()
   }
+  const requestSeq = ++chatRequestSeq
   loading.value = true
 
   // 占位：用户气泡（ASR 文本回填后替换）
@@ -1349,7 +1439,7 @@ const sendAudio = async (audioBlob) => {
       messages.value[aiMsgIndex].content = '[Error: 语音流式对话失败]'
     }
   } finally {
-    loading.value = false
+    if (chatRequestSeq === requestSeq) loading.value = false
   }
 }
 
@@ -1458,6 +1548,7 @@ const initDataAfterLogin = async () => {
 // ============================================================
 
 let proactiveEventSource = null  // SSE 长连接引用
+let proactiveTtsPlaybackSession = null
 
 /**
  * 注册主动搭话：调后端注册 + 开启 SSE 长连接监听
@@ -1523,6 +1614,7 @@ const registerProactiveChat = async () => {
   proactiveEventSource = new EventSource(url)
 
   proactiveEventSource.addEventListener('proactive', (e) => {
+    proactiveTtsPlaybackSession = createTtsPlaybackSession()
     // 收到主动搭话标记 → 在消息列表中新增 AI 消息
     const aiMsgIndex = messages.value.length
     messages.value.push({ role: 'ai', content: '', isProactive: true })
@@ -1551,7 +1643,11 @@ const registerProactiveChat = async () => {
     // 主动搭话的 TTS 事件（如果后端支持）
     let payload = {}
     try { payload = JSON.parse(e.data) } catch {}
-    handleTtsEvent(payload)
+    // EventSource 断线重连时可能漏掉 proactive 标记，仍为这轮回复补一个独立会话。
+    if (!proactiveTtsPlaybackSession) {
+      proactiveTtsPlaybackSession = createTtsPlaybackSession()
+    }
+    handleTtsEvent(payload, proactiveTtsPlaybackSession)
   })
 
   proactiveEventSource.addEventListener('done', (e) => {
@@ -1566,6 +1662,11 @@ const registerProactiveChat = async () => {
       messages.value[proactiveAiMsgIndex].content = '[已打断]'
     }
     proactiveAiMsgIndex = null
+    // 用户输入导致主动搭话中断时，禁止当前主动回复晚到的 TTS chunk 再次播放。
+    if (isTtsPlaybackSessionActive(proactiveTtsPlaybackSession)) {
+      stopCurrentAudio()
+    }
+    proactiveTtsPlaybackSession = null
     live2dController.setMotionSoundEnabled(false)
   })
 
@@ -1608,6 +1709,7 @@ const closeProactiveEventSource = () => {
     proactiveEventSource = null
   }
   proactiveAiMsgIndex = null
+  proactiveTtsPlaybackSession = null
 }
 </script>
 

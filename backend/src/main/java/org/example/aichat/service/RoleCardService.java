@@ -134,7 +134,7 @@ public class RoleCardService {
         vars.put("relationships", "");
         vars.put("examples", nullToEmpty(role.getExampleDialogue()));
         vars.put("mantra", "");
-        vars.put("intimacy_profile", "");
+        // vars.put("intimacy_profile", "");
         vars.put("sister_profiles", "");
         vars.put("wardrobe", "");
         vars.put("dragon_bubble", "");
@@ -175,7 +175,7 @@ public class RoleCardService {
 
             overwriteIfText(root, "mantra", vars, "mantra");
 
-            overwriteIfText(root, "intimacy_profile", vars, "intimacy_profile");
+            // overwriteIfText(root, "intimacy_profile", vars, "intimacy_profile");
 
             overwriteIfText(root, "sister_profiles", vars, "sister_profiles");
             overwriteIfText(root, "wardrobe", vars, "wardrobe");

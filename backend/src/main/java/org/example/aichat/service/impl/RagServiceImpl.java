@@ -57,9 +57,9 @@ public class RagServiceImpl implements RagService {
 
     /**
      * 启动时强制重建：true 则忽略 Redis 旧缓存，每次启动都重新扫描 + 向量化（异步，不阻塞主流程）。
-     * Embedding 服务挂掉时会回退到 Redis 旧缓存，保证可用性。
+     * 默认 false，重建由前端设置页手动触发，避免每次启动重复消耗 embedding。
      */
-    @Value("${rag.force-rebuild-on-startup:true}")
+    @Value("${rag.force-rebuild-on-startup:false}")
     private boolean forceRebuildOnStartup;
 
     private volatile List<RagChunk> chunks = List.of();
@@ -74,10 +74,10 @@ public class RagServiceImpl implements RagService {
 
     @PostConstruct
     public void init() {
-        // 模式 A：force-rebuild-on-startup=true（默认）
+        // 模式 A：force-rebuild-on-startup=true
         //   每次启动都重建：先把 Redis 旧缓存读到内存里"垫底"（保证 embedding 慢/挂时仍能检索），
         //   然后后台异步重新扫描 + 向量化，新结果完成后无缝替换。
-        //   适合 personas/* 经常迭代的开发期 —— 改了语料/persona/memory_cards 重启就生效，不用手动 POST /api/rag/reload。
+        //   适合临时开发调试；日常使用建议通过前端设置页手动重建。
         // 模式 B：force-rebuild-on-startup=false
         //   保留旧逻辑：Redis 命中即停；未命中且 eager-init=true 才异步预热。
         if (forceRebuildOnStartup) {

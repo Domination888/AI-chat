@@ -67,4 +67,8 @@ public class ChatRequest {
     /** 服务端延迟追踪（不序列化） */
     @JsonIgnore
     private transient LatencyTrace latencyTrace;
+
+    /** 当前 SSE 流 ID（不序列化），用于区分同一会话内的新旧流。 */
+    @JsonIgnore
+    private transient String streamId;
 }

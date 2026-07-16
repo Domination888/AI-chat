@@ -66,8 +66,22 @@
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">模型名称</label>
-              <input v-model="form.embeddingModelName" type="text" placeholder="text-embedding-embeddinggemma-300m"
+              <input v-model="form.embeddingModelName" type="text" placeholder="text-embedding-qwen3-embedding-4b"
                 class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-md text-sm" />
+            </div>
+            <div class="flex items-center justify-between gap-3 pt-1">
+              <div class="min-w-0">
+                <div class="text-sm font-medium text-gray-700 dark:text-gray-300">RAG 索引</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 truncate">语料或 Embedding 变更后手动重建</div>
+              </div>
+              <button
+                type="button"
+                @click="rebuildRagIndex"
+                :disabled="rebuildingRag"
+                class="shrink-0 px-3 py-2 text-sm border border-blue-500 text-blue-600 dark:text-blue-400 rounded-md hover:bg-blue-50 dark:hover:bg-blue-900/20 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {{ rebuildingRag ? '重建中...' : '重建 RAG 索引' }}
+              </button>
             </div>
           </div>
         </div>
@@ -105,13 +119,46 @@
           <div class="grid grid-cols-1 gap-3">
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Astra TTS 服务 URL</label>
-              <input v-model="form.astraTtsBaseUrl" type="text" placeholder="http://192.168.x.x:5000"
+              <input v-model="form.astraTtsBaseUrl" @blur="loadTtsAvatars" type="text" placeholder="http://192.168.x.x:5000"
                 class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-md text-sm" />
+            </div>
+            <div>
+              <div class="flex items-center justify-between gap-3 mb-1">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">已注册 TTS 音色</label>
+                <button
+                  type="button"
+                  @click="loadTtsAvatars"
+                  :disabled="loadingTtsAvatars || !form.astraTtsBaseUrl"
+                  class="px-2.5 py-1 text-xs border border-gray-300 dark:border-gray-600 dark:text-gray-300 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {{ loadingTtsAvatars ? '刷新中...' : '刷新' }}
+                </button>
+              </div>
+              <select
+                v-model="form.astraDefaultAvatarId"
+                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-md text-sm"
+              >
+                <option value="">自动选择</option>
+                <option
+                  v-for="avatar in ttsAvatars"
+                  :key="avatar.id"
+                  :value="avatar.id"
+                >
+                  {{ avatar.name ? `${avatar.name} (${avatar.id})` : avatar.id }}
+                </option>
+              </select>
+              <div v-if="ttsAvatarError" class="mt-1 text-xs text-red-500">{{ ttsAvatarError }}</div>
+              <div v-else-if="ttsAvatars.length" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                共 {{ ttsAvatars.length }} 个音色；当前选择会优先于自动匹配和角色配置。
+              </div>
+              <div v-else class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                点击刷新读取当前 TTS 服务的音色列表。
+              </div>
             </div>
             <div class="grid grid-cols-2 gap-3">
               <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">默认 Avatar ID</label>
-                <input v-model="form.astraDefaultAvatarId" type="text" placeholder="chenxing"
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">当前 Avatar ID</label>
+                <input v-model="form.astraDefaultAvatarId" type="text" placeholder="留空自动选择"
                   class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-md text-sm" />
               </div>
               <div>
@@ -286,6 +333,7 @@ import {
   runtimeConfigToSettings,
   saveRuntimeConfig
 } from '../utils/runtimeConfig.js'
+import { apiFetch } from '../utils/api.js'
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -296,6 +344,10 @@ const emit = defineEmits(['close', 'save'])
 
 const form = reactive({ ...DEFAULT_SETTINGS })
 const saving = ref(false)
+const rebuildingRag = ref(false)
+const loadingTtsAvatars = ref(false)
+const ttsAvatarError = ref('')
+const ttsAvatars = ref([])
 
 const PROACTIVE_IDLE_STEP = 1800
 const PROACTIVE_IDLE_DEFAULT = 3600
@@ -339,6 +391,7 @@ const loadSettings = async () => {
     applyForm(props.initialSettings)
   }
   darkModeSnapshot = form.darkMode
+  await loadTtsAvatars()
 }
 
 onMounted(async () => {
@@ -376,6 +429,69 @@ const saveSettings = async () => {
     ElMessage.error('保存配置失败')
   } finally {
     saving.value = false
+  }
+}
+
+const normalizeTtsAvatars = (avatars) => {
+  if (!Array.isArray(avatars)) return []
+  const seen = new Set()
+  return avatars
+    .map((avatar) => ({
+      id: String(avatar?.id || '').trim(),
+      name: String(avatar?.name || '').trim(),
+      description: String(avatar?.description || '').trim(),
+      referenceCount: avatar?.referenceCount
+    }))
+    .filter((avatar) => avatar.id)
+    .filter((avatar) => {
+      if (seen.has(avatar.id)) return false
+      seen.add(avatar.id)
+      return true
+    })
+}
+
+const loadTtsAvatars = async () => {
+  const baseUrl = form.astraTtsBaseUrl?.trim()
+  ttsAvatarError.value = ''
+  if (!baseUrl) {
+    ttsAvatars.value = []
+    return
+  }
+
+  loadingTtsAvatars.value = true
+  try {
+    const resp = await apiFetch(`/api/runtime-config/tts-avatars?baseUrl=${encodeURIComponent(baseUrl)}`)
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}`)
+    }
+    const data = await resp.json()
+    ttsAvatars.value = normalizeTtsAvatars(data)
+    if (form.astraDefaultAvatarId && !ttsAvatars.value.some((avatar) => avatar.id === form.astraDefaultAvatarId)) {
+      ttsAvatarError.value = `当前选择 ${form.astraDefaultAvatarId} 不在这个 TTS 服务的注册列表中`
+    }
+  } catch (e) {
+    console.error(e)
+    ttsAvatars.value = []
+    ttsAvatarError.value = '读取 TTS 音色列表失败'
+  } finally {
+    loadingTtsAvatars.value = false
+  }
+}
+
+const rebuildRagIndex = async () => {
+  rebuildingRag.value = true
+  try {
+    const resp = await apiFetch('/api/rag/reload', { method: 'POST' })
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}`)
+    }
+    const result = await resp.json()
+    ElMessage.success(`RAG 索引已重建，共 ${result.chunkCount ?? 0} 个分块`)
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('RAG 索引重建失败')
+  } finally {
+    rebuildingRag.value = false
   }
 }
 

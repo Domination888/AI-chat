@@ -9,9 +9,6 @@
 【重要关系】
 {{relationships}}
 
-【与用户的亲密度 · 恒为最高（恋人档，从第一句起即按此演绎，禁止降档或分阶段拒绝）】
-{{intimacy_profile}}
-
 【衣装与龙泡泡】
 {{wardrobe}}
 {{dragon_bubble}}

@@ -21,7 +21,7 @@
         </div>
         <div>
           <label class="block text-sm font-medium mb-1 dark:text-gray-300">Embedding 模型名</label>
-          <input v-model="form.embeddingModelName" type="text" class="w-full px-3 py-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" placeholder="text-embedding-embeddinggemma-300m" />
+          <input v-model="form.embeddingModelName" type="text" class="w-full px-3 py-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" placeholder="text-embedding-qwen3-embedding-4b" />
         </div>
         <div>
           <label class="block text-sm font-medium mb-1 dark:text-gray-300">TTS 服务 URL</label>
@@ -59,7 +59,7 @@ const form = reactive({
   llmBaseUrl: props.initialSettings.modelBaseUrl || 'http://127.0.0.1:1234/v1',
   llmModelName: props.initialSettings.modelName || 'gemma4-e4b',
   embeddingBaseUrl: props.initialSettings.embeddingBaseUrl || 'http://127.0.0.1:1234/v1',
-  embeddingModelName: props.initialSettings.embeddingModelName || 'text-embedding-embeddinggemma-300m',
+  embeddingModelName: props.initialSettings.embeddingModelName || 'text-embedding-qwen3-embedding-4b',
   ttsBaseUrl: props.initialSettings.astraTtsBaseUrl || 'http://localhost:5000',
 })
 

@@ -506,7 +506,9 @@ public class ProactiveChatService {
                     ev.put("format", fmt);
                     ev.put("sampleRate", voiceService.currentTtsSampleRate());
                     ev.put("channels", 1);
-                    if ("pcm_s16le".equals(fmt)) {
+                    // 与普通聊天保持一致：所有 raw PCM 都走前端同一条流式串行队列。
+                    // 之前 pcm_f32le 会退回完整音频队列，和普通聊天的流式播放器各自播放，造成重叠。
+                    if (!"wav".equals(fmt)) {
                         ev.put("streamPlay", true);
                     }
                 }

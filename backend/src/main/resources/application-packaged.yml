@@ -73,14 +73,14 @@ voice:
   asr-timeout-ms: 15000
   tts-engine: astra
   astra-tts-base-url: http://127.0.0.1:5000
-  astra-default-avatar-id: chenxing
+  astra-default-avatar-id: ""
   astra-streaming-chunk-size: 2048
   tts-timeout-ms: 60000
   tts-default-profile: shu
   tts-profiles:
     shu:
       display-name: "黍（默认）"
-      astra-avatar-id: Shu_v2proplus
+      astra-avatar-id: ""
       text-lang: zh
       speed-factor: 1.0
       temperature: 1.0

@@ -83,6 +83,26 @@ async function waitForUrl(url, name, attempts = 40, intervalMs = 1500, child = n
   throw new Error(`${name} 未在预期时间内就绪: ${url}`);
 }
 
+async function waitForBackendReady(port, child) {
+  const url = `http://127.0.0.1:${port}/api/roles`;
+  for (let i = 1; i <= 120; i++) {
+    if (child && child.exitCode != null) {
+      throw new Error(`Backend 进程已退出 (code=${child.exitCode})，请查看 logs/backend.log`);
+    }
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
+      if (res.ok) {
+        const roles = await res.json();
+        if (Array.isArray(roles)) return true;
+      }
+    } catch (_) {
+      /* retry until both Spring and MySQL are ready */
+    }
+    await sleep(1500);
+  }
+  throw new Error(`Backend 或数据库未在预期时间内就绪: ${url}`);
+}
+
 async function waitForAsrReady(port, child) {
   const url = `http://127.0.0.1:${port}/healthz`;
   for (let i = 1; i <= 240; i++) {
@@ -476,7 +496,7 @@ async function startBackend() {
     ['-jar', jar, '--spring.profiles.active=packaged', `--app.log-base-dir=${logsDir}`],
     { env: baseEnv(), cwd: path.dirname(jar) }
   );
-  await waitForUrl(`http://127.0.0.1:${p.backend}/api/health`, 'Backend', 120, 1500, child);
+  await waitForBackendReady(p.backend, child);
 }
 
 async function startAll(onProgress) {

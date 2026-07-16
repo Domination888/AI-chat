@@ -65,15 +65,15 @@ rag:
   #   true  = 启动时若 Redis 缓存为空，则后台异步向量化（不阻塞应用启动），
   #            首次提问到达时若仍未完成则同步等待最多 30s；之后命中 Redis 缓存秒级就绪
   #   false = 只读 Redis；缓存为空就让 RAG 一直空索引，需手动 POST /api/rag/reload
-  # 默认 true：项目所有角色卡 + 长期记忆都依赖 RAG，关闭等于"忘记角色设定"
+  # 默认 true：首次无缓存时自动构建；已有 Redis 缓存时不会重建
   eager-init: true
   # 启动时是否强制重建 RAG 缓存：
-  #   true（默认）= 每次启动都后台异步重新扫描 personas/*/lore + memory_cards 并向量化，
+  #   true        = 每次启动都后台异步重新扫描 personas/*/lore + memory_cards 并向量化，
   #                 新结果完成后无缝替换内存索引；
   #                 启动期会先用 Redis 旧缓存垫底，避免重建中检索全空
   #   false       = 走旧逻辑：Redis 命中即停，未命中再视 eager-init 决定是否预热
-  # 开发期改 persona/memory_cards 后重启就能生效，不需要再 POST /api/rag/reload
-  force-rebuild-on-startup: true
+  # 改 persona/memory_cards 或切换 embedding 模型后，请在前端设置中点击"重建 RAG 索引"
+  force-rebuild-on-startup: false
 
 llm:
   # Win 机 LM Studio (Gemma4-31B Dense, GGUF Q4/Q5, ctx_len=8192)，OpenAI 兼容；规则强约束：LLM 必须走 Win
@@ -100,12 +100,12 @@ voice:
   asr-language: auto
   asr-timeout-ms: 15000
   # ---------------- TTS 引擎 ----------------
-  # Astra (Genie-TTS) 部署在 Win :5000，流式返回 raw PCM 32kHz
+  # AstraTTS / Genie-TTS，流式返回 raw PCM 32kHz
   tts-engine: astra
-  # Astra TTS 服务基础 URL（Win 主机）
-  astra-tts-base-url: http://192.168.124.2:5000
-  # 默认 avatarId（兜底音色，Astra 服务端已配置）
-  astra-default-avatar-id: chenxing
+  # Astra TTS 服务基础 URL
+  astra-tts-base-url: http://localhost:5000
+  # 默认 avatarId 只作兜底；为空时后端会从当前 URL 的 /api/tts/avatars 自动发现黍音色
+  astra-default-avatar-id: ""
   # 流式分片大小（chunkSize 参数）
   astra-streaming-chunk-size: 2048
   # 单次 TTS 超时（毫秒）
@@ -116,8 +116,8 @@ voice:
   tts-profiles:
     shu:
       display-name: "黍（默认）"
-      # Astra avatarId：对应 Win 上 TTS 服务注册的音色
-      astra-avatar-id: Shu_v2proplus
+      # astra-avatar-id 留空时按当前服务自动发现（Mac: Shu_2；Win: 以服务返回为准）
+      astra-avatar-id: ""
       text-lang: zh
       speed-factor: 1.0
       temperature: 1.0

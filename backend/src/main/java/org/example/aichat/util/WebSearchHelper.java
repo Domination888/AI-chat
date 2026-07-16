@@ -20,6 +20,14 @@ public final class WebSearchHelper {
     private static final Pattern WEATHER_INTENT = Pattern.compile("天气|气温|温度|几度|下雨|下雪|刮风|预报");
     private static final Pattern CITY = cityPattern();
     private static final Pattern VAGUE_WEATHER = Pattern.compile("^(天气|气温|温度|几度|具体天气|天气情况|天气如何)$");
+    private static final Pattern STRONG_WEB_INTENT = Pattern.compile(
+            "(联网|搜索|查(一下|下|找|询)?|搜(一下|下)?|最新|最近|现在|当前|目前|今天|今日|昨日|昨天|明天|本周|本月|今年|"
+                    + "新闻|热搜|公告|发布|更新|版本|价格|股价|汇率|票房|赛程|比分|排名|政策|法规|规定|官网|链接|网址|下载|"
+                    + "论文|报告|数据|统计|榜单|参数|配置|评测|对比|是否还|有没有|什么时候)");
+    private static final Pattern EXTERNAL_FACT_HINT = Pattern.compile(
+            "(OpenAI|ChatGPT|Claude|Gemini|GPT|Qwen|DeepSeek|Llama|Android|iOS|Windows|macOS|Java|Spring|Vue|React|Docker|"
+                    + "英伟达|苹果|微软|谷歌|特斯拉|小米|华为|字节|阿里|腾讯|B站|微博|知乎|GitHub|npm|Maven|PyPI|Steam|"
+                    + "电影|电视剧|游戏|会议|展会|考试|航班|高铁|机票|酒店|门票|股票|基金|加密货币)");
 
     private static final Map<String, String> CITY_WTTR = new LinkedHashMap<>();
 
@@ -73,7 +81,13 @@ public final class WebSearchHelper {
                 && optimized.length() < 12) {
             return false;
         }
-        return true;
+        if (STRONG_WEB_INTENT.matcher(message).find()) {
+            return true;
+        }
+        if (EXTERNAL_FACT_HINT.matcher(message).find() && optimized.length() >= 4) {
+            return true;
+        }
+        return looksLikeConcreteQuestion(optimized);
     }
 
     /**
@@ -105,7 +119,22 @@ public final class WebSearchHelper {
             }
         }
 
+        if (STRONG_WEB_INTENT.matcher(message).find()
+                && !q.matches(".*(最新|今天|今日|当前|现在|202\\d|新闻|价格|版本|官网|公告).*")) {
+            q = q + " 最新";
+        }
+
         return q.trim();
+    }
+
+    private static boolean looksLikeConcreteQuestion(String optimized) {
+        if (optimized.length() < 8) {
+            return false;
+        }
+        if (optimized.matches(".*(是什么|是谁|哪里|哪个|多少|为什么|怎么|如何|区别|对比|原因|时间|日期|地址|官网|下载).*")) {
+            return true;
+        }
+        return optimized.matches(".*[A-Za-z0-9].*") && optimized.length() >= 6;
     }
 
     /**

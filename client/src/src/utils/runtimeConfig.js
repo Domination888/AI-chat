@@ -148,7 +148,7 @@ export function settingsToRuntimeConfig(settings) {
       asrTimeoutMs: settings.asrTimeoutMs ?? null,
       ttsEngine: settings.ttsEngine || null,
       astraTtsBaseUrl: settings.astraTtsBaseUrl?.trim() || null,
-      astraDefaultAvatarId: settings.astraDefaultAvatarId?.trim() || null,
+      astraDefaultAvatarId: settings.astraDefaultAvatarId == null ? null : settings.astraDefaultAvatarId.trim(),
       astraStreamingChunkSize: settings.astraStreamingChunkSize ?? null,
       ttsTimeoutMs: settings.ttsTimeoutMs ?? null,
       ttsDefaultProfile: settings.ttsDefaultProfile?.trim() || null

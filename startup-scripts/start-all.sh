@@ -9,8 +9,7 @@ PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOG_DIR="$PROJECT_ROOT/unified-logs"
 PID_DIR="$LOG_DIR/pids"
 PID_FILE="$PID_DIR/pids.txt"
-
-mkdir -p "$PID_DIR"
+CLEANUP_EXIT_CODE=0
 
 info() {
     printf '[INFO] %s\n' "$*"
@@ -20,35 +19,97 @@ error() {
     printf '[ERROR] %s\n' "$*" >&2
 }
 
-# 启动前清空 pids.txt，避免历史残留 PID 越积越多
-> "$PID_FILE"
+mkdir -p "$PID_DIR"
 
 info "Starting AI-Chat Complete Development Environment..."
 
+# 递归收集 PID 自身 + 所有子孙进程
+collect_descendants() {
+    local pid=$1
+    [ -z "$pid" ] && return 0
+
+    echo "$pid"
+
+    local children
+    children=$(pgrep -P "$pid" 2>/dev/null || true)
+
+    local child
+    for child in $children; do
+        collect_descendants "$child"
+    done
+}
+
+# 只按 PID 日志清理本项目记录的进程，不按端口杀未知进程。
+kill_tree() {
+    local pid=$1
+    [ -z "$pid" ] && return 0
+    kill -0 "$pid" 2>/dev/null || return 0
+
+    local all
+    all=$(collect_descendants "$pid" | sort -u)
+    [ -z "$all" ] && return 0
+
+    echo "$all" | xargs kill 2>/dev/null || true
+
+    local i=0
+    local alive=0
+    while [ "$i" -lt 3 ]; do
+        alive=0
+        local p
+        for p in $all; do
+            if kill -0 "$p" 2>/dev/null; then
+                alive=1
+                break
+            fi
+        done
+        [ "$alive" -eq 0 ] && break
+        sleep 1
+        i=$((i + 1))
+    done
+
+    if [ "$alive" -ne 0 ]; then
+        echo "$all" | xargs kill -9 2>/dev/null || true
+    fi
+}
+
+stop_services_from_pid_file() {
+    [ -f "$PID_FILE" ] || return 0
+
+    info "Stopping existing services from $PID_FILE..."
+    while read -r name pid; do
+        [ -z "$pid" ] && continue
+        info "Stopping $name ($pid)"
+        kill_tree "$pid"
+    done < "$PID_FILE"
+}
+
+ensure_ports_available() {
+    local unavailable=0
+    local port
+    for port in "$@"; do
+        if lsof -ti:"$port" >/dev/null; then
+            error "Port $port is still in use, but it is not safe to kill by port."
+            error "Run ./startup-scripts/stop-all.sh or remove the conflicting process manually."
+            unavailable=1
+        fi
+    done
+
+    return "$unavailable"
+}
+
 # 清理函数
 cleanup() {
+    local exit_code="${CLEANUP_EXIT_CODE:-0}"
     printf '\n'
     info "Stopping all services..."
-    if [ -f "$PID_FILE" ]; then
-        awk '{print $2}' "$PID_FILE" | xargs kill -9 2>/dev/null || true
-        rm -f "$PID_FILE"
-    fi
+    stop_services_from_pid_file
+    rm -f "$PID_FILE"
     info "All services stopped."
-    exit 0
+    exit "$exit_code"
 }
 
 # 设置清理陷阱
 trap cleanup INT TERM
-
-# 检查端口并清理
-check_and_kill_port() {
-    local port=$1
-    if lsof -ti:$port >/dev/null; then
-        info "Port $port is in use, killing existing processes..."
-        lsof -ti:$port | xargs kill -9 2>/dev/null || true
-        sleep 2
-    fi
-}
 
 # 检查服务是否启动成功
 check_service() {
@@ -60,7 +121,7 @@ check_service() {
     info "Waiting for $name to start..."
     
     while [ $attempt -le $max_attempts ]; do
-        if curl -s --max-time 5 $url > /dev/null; then
+        if curl -fsS --max-time 5 "$url" > /dev/null; then
             info "$name is running!"
             return 0
         fi
@@ -97,26 +158,22 @@ start_searxng() {
 
 # 启动后端
 start_backend() {
-    check_and_kill_port 8080
-
     info "Starting Spring Boot backend..."
     mkdir -p "$LOG_DIR/backend"
     cd "$PROJECT_ROOT/backend"
     ./mvnw spring-boot:run > "$LOG_DIR/backend/app.log" 2>&1 &
     cd "$PROJECT_ROOT"
 
-    if ! check_service "http://localhost:8080/api/health" "Backend"; then
+    # /api/health 不访问数据库，不能代表角色数据已经可读。
+    # 直接探测角色接口，避免 Electron 首屏请求撞上 Hikari/MySQL 首次建连。
+    if ! check_service "http://localhost:8080/api/roles" "Backend and database"; then
         error "Backend failed to start. Check $LOG_DIR/backend/app.log"
         return 1
     fi
-    # mvnw 是 wrapper，真正监听 8080 的是 spawn 出来的 java 进程
-    BACKEND_PID=$(resolve_port_pid 8080)
 }
 
 # 启动前端
 start_frontend() {
-    check_and_kill_port 3000
-
     info "Starting Vite frontend server..."
     mkdir -p "$LOG_DIR/frontend"
     cd "$PROJECT_ROOT/client/src"
@@ -127,8 +184,6 @@ start_frontend() {
         error "Frontend failed to start. Check $LOG_DIR/frontend/app.log"
         return 1
     fi
-    # npm 是 wrapper，真正监听 3000 的是 vite/esbuild 子进程
-    FRONTEND_PID=$(resolve_port_pid 3000)
 }
 
 # 启动Electron客户端（无监听端口，用 $! 即可）
@@ -149,8 +204,6 @@ start_client() {
 
 # 启动ASR服务
 start_asr() {
-    check_and_kill_port 9000
-
     info "Starting SenseVoice ASR service..."
     mkdir -p "$LOG_DIR/asr"
     cd "$PROJECT_ROOT/services/sense-voice"
@@ -161,19 +214,34 @@ start_asr() {
         error "ASR service failed to start. Check $LOG_DIR/asr/app.log"
         return 1
     fi
-    # python server.py 一般 $! 即真身，但仍以端口为准更稳
-    ASR_PID=$(resolve_port_pid 9000)
 }
 
-# 启动TTS服务（已迁移到 Win，仅做健康检查）
+# 检查 TTS 服务（AstraTTS 独立启动，这里只做健康检查）
+get_tts_base_url() {
+    python3 - <<'PY'
+import json
+from pathlib import Path
+
+cfg = Path("config/runtime-config.json")
+try:
+    data = json.loads(cfg.read_text(encoding="utf-8"))
+    url = (data.get("voice") or {}).get("astraTtsBaseUrl") or "http://localhost:5000"
+except Exception:
+    url = "http://localhost:5000"
+print(url.rstrip("/"))
+PY
+}
+
 start_tts() {
-    local tts_url="http://192.168.124.2:5000/api/tts/status"
-    info "Checking Astra TTS service on Win..."
+    local tts_base_url
+    tts_base_url="$(get_tts_base_url)"
+    local tts_url="${tts_base_url}/api/tts/status"
+    info "Checking Astra TTS service at $tts_base_url..."
     if curl -s --max-time 5 "$tts_url" > /dev/null 2>&1; then
-        info "Astra TTS service is reachable on Win (:5000)"
+        info "Astra TTS service is reachable at $tts_base_url"
     else
         info "Astra TTS service not reachable at $tts_url"
-        info "Make sure the TTS service is running on Win."
+        info "Make sure the AstraTTS service is running."
     fi
 }
 
@@ -185,7 +253,7 @@ show_status() {
     info "Backend: http://localhost:8080/api/health"
     info "SearXNG: http://localhost:8888 (本地联网搜索)"
     info "ASR: http://localhost:9000/healthz"
-    info "TTS: http://192.168.124.2:5000 (Astra on Win)"
+    info "TTS: $(get_tts_base_url) (AstraTTS)"
     info "Electron: Desktop app should appear"
     printf '\n'
     info "Unified Logs Location: $LOG_DIR/"
@@ -193,7 +261,7 @@ show_status() {
     info "Frontend: $LOG_DIR/frontend/app.log"
     info "Client: CLIENT_LOG=1 时写入 $LOG_DIR/client/app.log"
     info "ASR: $LOG_DIR/asr/app.log"
-    info "TTS: remote Astra service on Win (no local log)"
+    info "TTS: external AstraTTS service (see AstraTTS logs)"
     printf '\n'
     info "To stop all services: Press Ctrl+C or run kill \$(awk '{print \$2}' $PID_FILE)"
     info "Or use: ./startup-scripts/stop-all.sh"
@@ -212,30 +280,78 @@ upsert_pid() {
 
 # 保存PID（统一写入 pids.txt，避免重复）
 save_pids() {
+    # mvnw / npm 这类 wrapper 的 $! 不一定是真正监听进程；健康检查完成后统一按端口解析。
+    BACKEND_PID=$(resolve_port_pid 8080)
+    FRONTEND_PID=$(resolve_port_pid 3000)
+    ASR_PID=$(resolve_port_pid 9000)
+
     upsert_pid "backend" "$BACKEND_PID"
     upsert_pid "frontend" "$FRONTEND_PID"
     upsert_pid "client" "$CLIENT_PID"
     upsert_pid "asr" "$ASR_PID"
 }
 
+wait_for_job() {
+    local pid="$1"
+    local name="$2"
+    if wait "$pid"; then
+        return 0
+    fi
+
+    error "$name failed during startup"
+    return 1
+}
+
 # 主流程
 main() {
-    # 启动各个服务
-    start_searxng
-    start_backend
-    start_frontend
-    start_client
-    start_asr
-    start_tts
-    
-    # 保存PID信息
+    local failed=0
+
+    stop_services_from_pid_file
+    rm -f "$PID_FILE"
+    if ! ensure_ports_available 8080 3000 9000; then
+        return 1
+    fi
+    > "$PID_FILE"
+
+    # 后端、前端、ASR、SearXNG、TTS 互不阻塞，并发启动并各自做健康检查。
+    start_searxng &
+    SEARXNG_JOB=$!
+    start_backend &
+    BACKEND_JOB=$!
+    start_frontend &
+    FRONTEND_JOB=$!
+    start_asr &
+    ASR_JOB=$!
+    start_tts &
+    TTS_JOB=$!
+
+    # Electron 首屏会立即读取角色列表，必须同时等 Vite 和数据库可用。
+    local frontend_ready=0
+    local backend_ready=0
+    wait_for_job "$FRONTEND_JOB" "Frontend" && frontend_ready=1 || failed=1
+    wait_for_job "$BACKEND_JOB" "Backend" && backend_ready=1 || failed=1
+    if [ "$frontend_ready" -eq 1 ] && [ "$backend_ready" -eq 1 ]; then
+        start_client
+    fi
+
+    wait_for_job "$ASR_JOB" "ASR Service" || failed=1
+    wait_for_job "$SEARXNG_JOB" "SearXNG" || true
+    wait_for_job "$TTS_JOB" "TTS check" || true
+
     save_pids
-    
-    # 显示状态
+
+    if [ "$failed" -ne 0 ]; then
+        error "Startup failed. Check logs under $LOG_DIR/"
+        CLEANUP_EXIT_CODE=1
+        cleanup
+    fi
+
     show_status
-    
-    # 等待用户中断
-    wait
+
+    while true; do
+        sleep 3600 &
+        wait $!
+    done
 }
 
 # 执行主流程
