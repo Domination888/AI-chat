@@ -17,7 +17,7 @@
 | 脚本 | 用途 | 备注 |
 | --- | --- | --- |
 | `scripts/setup-dev.sh` | 安装开发依赖 | Maven、Electron、前端和 ASR Python 依赖的一次性初始化。 |
-| `scripts/build-all.sh` | 构建可打包产物 | 构建 SearXNG MCP JAR、Prime MCP JAR、后端 JAR 和前端 dist。 |
+| `scripts/build-all.sh` | 构建可打包产物 | 构建 Prime MCP JAR、后端 JAR 和前端 dist；联网搜索已内置在后端。 |
 | `scripts/package-all.sh` | 一键打包桌面应用 | 调用构建、准备 ASR 模型、组装 runtime staging，然后运行 electron-builder。 |
 | `scripts/download-asr-models.sh` | 下载 SenseVoice 模型 | 写入 `packaging/cache/asr-models/`，通常由 `package-all.sh` 自动触发。 |
 

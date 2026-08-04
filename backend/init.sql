@@ -60,6 +60,48 @@ CREATE TABLE IF NOT EXISTS `history` (
   KEY `idx_conv` (`conversation_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='消息历史';
 
+-- ---------------------------- 主动研究兴趣 ----------------------------
+CREATE TABLE IF NOT EXISTS `proactive_interest` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `user_id` int NOT NULL,
+  `topic` varchar(128) NOT NULL,
+  `source` varchar(16) NOT NULL DEFAULT 'inferred' COMMENT 'inferred / manual',
+  `weight` double NOT NULL DEFAULT 0.5,
+  `enabled` tinyint(1) NOT NULL DEFAULT 1,
+  `muted_until` datetime DEFAULT NULL,
+  `evidence` varchar(512) DEFAULT NULL,
+  `last_inferred_at` datetime DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_proactive_interest_user_topic` (`user_id`,`topic`),
+  KEY `idx_proactive_interest_active` (`user_id`,`enabled`,`weight`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='主动研究兴趣';
+
+-- ---------------------------- 主动研究候选 ----------------------------
+CREATE TABLE IF NOT EXISTS `proactive_candidate` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `user_id` int NOT NULL,
+  `conversation_id` varchar(64) DEFAULT NULL,
+  `topic` varchar(128) NOT NULL,
+  `title` varchar(512) NOT NULL,
+  `summary` mediumtext,
+  `reason` varchar(512) DEFAULT NULL,
+  `sources_json` json DEFAULT NULL,
+  `score` double NOT NULL,
+  `fingerprint` char(64) NOT NULL,
+  `status` varchar(16) NOT NULL DEFAULT 'pending',
+  `response_text` mediumtext,
+  `feedback` varchar(16) DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `expires_at` datetime NOT NULL,
+  `delivered_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_proactive_candidate_queue` (`user_id`,`status`,`expires_at`,`score`),
+  KEY `idx_proactive_candidate_fp` (`user_id`,`fingerprint`,`created_at`),
+  KEY `idx_proactive_candidate_conv` (`conversation_id`,`delivered_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='主动研究候选';
+
 -- ========================================================
 -- 预置角色卡
 -- ========================================================

@@ -1,0 +1,12 @@
+{
+  "capturedAt": "2026-07-22T10:48:44.009643+00:00",
+  "mode": "search-rag-candidate",
+  "caseCount": 10,
+  "precisionAt3": 1.0,
+  "coverageAt3": 0.3704,
+  "urlFormatValidity": 1.0,
+  "noResultAccuracy": 1.0,
+  "latencyP95Ms": 19861,
+  "improvementPercentagePoints": 72.0,
+  "notes": "冷缓存整集；评测时部分上游引擎受 CAPTCHA/限流，Search-RAG 选择少返回而不注入低置信度摘要。Coverage@3 独立报告，不混入来源精度。"
+}

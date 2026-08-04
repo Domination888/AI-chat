@@ -3,6 +3,9 @@ package org.example.aichat.skill;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
 import org.example.aichat.mcp.McpClientManager;
+import org.example.aichat.search.SearchRequest;
+import org.example.aichat.search.SearchResponse;
+import org.example.aichat.search.WebSearchGateway;
 import org.example.aichat.util.WebSearchHelper;
 
 import java.util.List;
@@ -72,7 +75,7 @@ public final class WeatherSkillHandler {
      * 组装注入块；无城市或拉取失败时返回 null（由模型按技能说明追问或自行调工具）。
      */
     public static String buildContext(String message, List<ChatMessage> history,
-                                      boolean supplementWebSearch, McpClientManager mcp) {
+                                      boolean supplementWebSearch, WebSearchGateway searchGateway) {
         String city = resolveCity(message, history);
         if (city == null) {
             return null;
@@ -85,13 +88,15 @@ public final class WeatherSkillHandler {
             sb.append(snapshot);
         }
 
-        if (supplementWebSearch && mcp != null) {
-            String searx = mcp.webSearch(synthetic);
-            if (searx != null && !searx.isBlank()) {
+        if (supplementWebSearch && searchGateway != null) {
+            SearchResponse response = searchGateway.search(SearchRequest.builder()
+                    .query(synthetic).timeRange("day").maxSources(2).build());
+            String research = response.getContextText();
+            if (response.hasSources() && research != null && !research.isBlank()) {
                 if (sb.length() > 0) {
                     sb.append("\n\n【补充检索】\n");
                 }
-                sb.append(searx.trim());
+                sb.append(research.trim());
             }
         }
 

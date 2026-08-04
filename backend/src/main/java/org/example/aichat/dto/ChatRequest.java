@@ -5,6 +5,8 @@ import lombok.Data;
 import org.example.aichat.util.LatencyTrace;
 
 import java.util.List;
+import java.util.function.Consumer;
+import org.example.aichat.search.SearchProgress;
 
 @Data
 public class ChatRequest {
@@ -71,4 +73,16 @@ public class ChatRequest {
     /** 当前 SSE 流 ID（不序列化），用于区分同一会话内的新旧流。 */
     @JsonIgnore
     private transient String streamId;
+
+    /** 搜索阶段进度回调，由 ChatController 绑定到当前 SSE。 */
+    @JsonIgnore
+    private transient Consumer<SearchProgress> searchProgressListener;
+
+    /** 主动研究等内部触发：提示只参与本轮推理，不作为用户消息持久化。 */
+    @JsonIgnore
+    private transient boolean internalTrigger;
+
+    /** 完整助手回复落库后回调，用于绑定主动候选。 */
+    @JsonIgnore
+    private transient Consumer<String> assistantCompleteListener;
 }

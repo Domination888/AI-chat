@@ -29,25 +29,21 @@
         {
           "Name": "种到土里",
           "File": "种到土里（点手）.motion3.json",
-          "Sound": "作战中4.wav",
           "Priority": 4
         },
         {
           "Name": "种到地里",
           "File": "种到地里.motion3.json",
-          "Sound": "戳一下.wav",
           "Priority": 4
         },
         {
           "Name": "谷种入田野",
           "File": "谷种入田野.motion3.json",
-          "Sound": "完成高难行动.wav",
           "Priority": 4
         },
         {
           "Name": "钓鱼",
           "File": "钓鱼.motion3.json",
-          "Sound": "信赖触摸.wav",
           "Priority": 4
         },
         {

@@ -13,7 +13,7 @@ AI-Chat 是一个本地优先的二次元角色对话桌面应用：Electron + V
 | TTS | Astra/Genie-TTS，默认 `astra` 策略 |
 | 记忆 | Memos 长期记忆 + Redis RAG fallback |
 | 存储 | MySQL + Redis |
-| 工具 | LangChain4j MCP，本地 SearXNG 搜索与 Prime 示例工具 |
+| 工具 | 后端 Search-RAG 联网搜索 + LangChain4j MCP（Prime 示例工具） |
 | 打包 | electron-builder + `packaging/stage-runtime.sh` |
 
 ## 目录结构
@@ -27,7 +27,7 @@ AI-Chat/
 ├── docs/                    # 当前项目文档
 ├── packaging/               # 全依赖安装包的缓存、模板、staging 脚本
 ├── scripts/                 # 构建、打包、数据库辅助脚本
-├── services/                # SenseVoice、SearXNG MCP、Prime MCP 等服务
+├── services/                # SenseVoice、SearXNG、保留的旧搜索 MCP 源码、Prime MCP 等服务
 ├── startup-scripts/         # 开发环境一键启动/停止脚本
 └── unified-logs/            # 开发期统一日志
 ```
@@ -87,11 +87,13 @@ AI-Chat/
 - `GET /api/audio/tts`：独立 TTS。
 - `GET /api/rag/reload`：手动重建 RAG。
 - `GET/PUT /api/runtime-config`：读取和保存运行时配置。
+- `GET /api/search/health`、`POST /api/search/test`：Search-RAG 健康检查与测试搜索。
+- `/api/proactive-research/*`：主动话题兴趣、候选、反馈与手动触发接口。
 - `GET/PUT/POST/DELETE /api/roles`：角色卡管理。
 
 ## 构建与打包
 
-构建后端、前端和 MCP JAR：
+构建后端、前端和默认启用的 MCP JAR：
 
 ```bash
 ./scripts/build-all.sh
@@ -104,6 +106,15 @@ AI-Chat/
 ./scripts/package-all.sh win
 ```
 
-打包版内置 Electron、后端 JAR、JRE、ASR、MySQL、Redis、MemOS、SearXNG、MCP JAR；LLM、Embedding、TTS 仍由用户在首次启动向导或设置页填写 URL。
+打包版内置 Electron、后端 JAR、JRE、ASR、MySQL、Redis、MemOS、SearXNG 和 Prime MCP JAR。联网搜索由后端直接读取 SearXNG JSON、抓取公开网页并在本地重排；LLM、Embedding、TTS 仍由用户在首次启动向导或设置页填写 URL。
 
 更多细节见 `docs/packaging.md` 和 `docs/scripts.md`。
+
+联网搜索回归可在后端和 SearXNG 启动后运行：
+
+```bash
+python3 scripts/evaluate-search-rag.py --mode baseline
+python3 scripts/evaluate-search-rag.py --mode candidate
+```
+
+固定评测集位于 `backend/src/test/resources/search-evaluation.json`；已记录的旧版基线与本次候选结果分别见 `docs/search-evaluation-baseline.json`、`docs/search-evaluation-candidate.json`。报告同时给出 Precision@3 与 Coverage@3：系统可以少返回，但返回的来源必须可靠。

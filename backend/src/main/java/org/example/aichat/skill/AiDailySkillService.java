@@ -3,9 +3,11 @@ package org.example.aichat.skill;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.aichat.mcp.AppPaths;
-import org.example.aichat.mcp.McpClientManager;
+import org.example.aichat.search.SearchRequest;
+import org.example.aichat.search.SearchResponse;
+import org.example.aichat.search.WebSearchGateway;
 import org.example.aichat.service.ProactiveChatService;
-import org.example.aichat.util.WebSearchHelper;
+import org.example.aichat.service.ProactiveResearchService;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import dev.langchain4j.data.message.ChatMessage;
@@ -63,6 +65,7 @@ public class AiDailySkillService {
     private final SkillService skillService;
     private final AppPaths appPaths;
     private final ObjectProvider<ProactiveChatService> proactiveChatServiceProvider;
+    private final ObjectProvider<ProactiveResearchService> proactiveResearchServiceProvider;
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "ai-daily-skill-scheduler");
         t.setDaemon(true);
@@ -100,7 +103,7 @@ public class AiDailySkillService {
         return isDetailFollowUp(message) && recentHistoryMentionsDaily(history);
     }
 
-    public Optional<String> buildNewsInjection(String message, List<ChatMessage> history, McpClientManager mcp) {
+    public Optional<String> buildNewsInjection(String message, List<ChatMessage> history, WebSearchGateway searchGateway) {
         Optional<DailyDigest> digest = fetchLatestDigest();
         if (digest.isEmpty()) {
             return Optional.empty();
@@ -110,7 +113,7 @@ public class AiDailySkillService {
                 ? resolveReferencedItem(message, history, digest.get())
                 : Optional.empty();
         if (detailItem.isPresent()) {
-            block += "\n\n" + buildSourceSearchBlock(detailItem.get(), mcp);
+            block += "\n\n" + buildSourceSearchBlock(detailItem.get(), searchGateway);
         } else if (isDetailFollowUp(message)) {
             block += "\n\n【追问处理提示】\n用户在追问具体新闻，但未能可靠定位到日报中的某一条。请先请用户说明想看第几条或哪个标题，不要猜。";
         }
@@ -187,18 +190,29 @@ public class AiDailySkillService {
         if (manifest.isEmpty() || manifest.get().getProactive() == null || !manifest.get().getProactive().isEnabled()) {
             return false;
         }
-        String prompt = buildProactivePrompt(manifest.get(), digest);
-        List<String> links = digest.items().stream().map(DailyItem::link).filter(s -> !s.isBlank()).toList();
+        List<org.example.aichat.search.SearchSource> sources = digest.items().stream()
+                .filter(item -> item.link() != null && !item.link().isBlank())
+                .limit(3)
+                .map(item -> org.example.aichat.search.SearchSource.builder()
+                        .title(item.title()).url(item.link()).snippet(item.summary())
+                        .excerpts(item.detail().isBlank() ? List.of(item.summary()) : List.of(item.detail()))
+                        .score(0.85).build())
+                .toList();
         ProactiveChatService proactiveChatService = proactiveChatServiceProvider.getIfAvailable();
-        if (proactiveChatService == null) {
+        ProactiveResearchService proactiveResearchService = proactiveResearchServiceProvider.getIfAvailable();
+        if (proactiveChatService == null || proactiveResearchService == null || sources.isEmpty()) {
             return false;
         }
-        boolean triggered = proactiveChatService.triggerTopicForCurrent(new ProactiveChatService.ProactiveTopic(
-                SKILL_NAME, digest.title(), formatDigestBlock(digest), links, prompt));
-        if (triggered && dedupe) {
+        boolean queued = proactiveChatService.activeTargets().stream()
+                .map(ProactiveChatService.ActiveTarget::userId).distinct()
+                .map(userId -> proactiveResearchService.enqueueExternalCandidate(
+                        userId, "AI 日报", digest.title(), formatDigestBlock(digest),
+                        "来自今天的 AI 日报", sources, 85.0))
+                .reduce(false, Boolean::logicalOr);
+        if (queued && dedupe) {
             saveLastTriggeredKey(digest.key());
         }
-        return triggered;
+        return queued;
     }
 
     private String buildProactivePrompt(SkillManifest manifest, DailyDigest digest) {
@@ -230,18 +244,19 @@ public class AiDailySkillService {
         return sb.toString().strip();
     }
 
-    private String buildSourceSearchBlock(DailyItem item, McpClientManager mcp) {
+    private String buildSourceSearchBlock(DailyItem item, WebSearchGateway searchGateway) {
         StringBuilder sb = new StringBuilder();
         sb.append("【日报原始链接检索 · ").append(item.title()).append("】\n");
         sb.append("日报条目链接：").append(item.link()).append("\n");
-        if (mcp == null || item.link().isBlank()) {
+        if (searchGateway == null || item.link().isBlank()) {
             sb.append("未执行联网检索：缺少搜索工具或原始链接。");
             return sb.toString();
         }
         String query = item.title() + " " + item.link();
-        String result = mcp.webSearch(query);
-        String context = WebSearchHelper.buildSearchContext(result);
-        if (context == null || context.isBlank()) {
+        SearchResponse response = searchGateway.search(SearchRequest.builder()
+                .query(query).maxSources(3).build());
+        String context = response.getContextText();
+        if (!response.hasSources() || context == null || context.isBlank()) {
             sb.append("联网检索未返回可用结果。回答时只能基于日报正文，并说明未能打开/查到原始链接补充内容。");
         } else {
             sb.append("搜索 query：").append(query).append("\n");

@@ -32,7 +32,7 @@ import org.example.aichat.service.memos.MemosClient;
 import org.example.aichat.service.memos.MemosWriteQueueService;
 import org.example.aichat.mapper.ConversationMapper;
 import org.example.aichat.dto.Conversation;
-import org.example.aichat.config.LlmProperties;
+import org.example.aichat.config.LlmModelFactory;
 import org.example.aichat.util.PromptLogger;
 import org.example.aichat.util.LatencyTrace;
 import org.springframework.stereotype.Service;
@@ -49,8 +49,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @RequiredArgsConstructor
 public class ChatServiceImpl implements ChatService {
 
-    @Resource
-    private StreamingChatModel streamingChatModel;
     @Resource
     private PromptService promptService;
     @Resource
@@ -77,7 +75,7 @@ public class ChatServiceImpl implements ChatService {
     private SinkRegistry sinkRegistry;
 
     @Resource
-    private LlmProperties llmProperties;
+    private LlmModelFactory llmModelFactory;
 
     @Resource
     private org.example.aichat.config.MemosProperties memosProperties;
@@ -106,15 +104,7 @@ public class ChatServiceImpl implements ChatService {
      * 始终用 SpringRestClientBuilder 以保证超时/连接参数生效。
      */
     private StreamingChatModel createStreamingChatModel(String requestBaseUrl, String requestModelName) {
-        String baseUrl = (requestBaseUrl != null && !requestBaseUrl.isBlank()) ? requestBaseUrl : llmProperties.getBaseUrl();
-        String modelName = (requestModelName != null && !requestModelName.isBlank()) ? requestModelName : llmProperties.getEffectiveStreamingModelName();
-        log.info("创建 StreamingChatModel: baseUrl={}, modelName={}", baseUrl, modelName);
-        return dev.langchain4j.model.openai.OpenAiStreamingChatModel.builder()
-                .baseUrl(baseUrl)
-                .modelName(modelName)
-                .timeout(java.time.Duration.ofMillis(llmProperties.getReadTimeoutMs()))
-                .httpClientBuilder(new dev.langchain4j.http.client.spring.restclient.SpringRestClientBuilder())
-                .build();
+        return llmModelFactory.createStreamingChatModel(requestBaseUrl, requestModelName);
     }
 
     @Override
@@ -127,19 +117,21 @@ public class ChatServiceImpl implements ChatService {
         Integer roleId = resolveRoleId(request.getRoleId());
         Integer userId = 0;
         LatencyTrace trace = request.getLatencyTrace();
-        // 0. 保存或更新会话表
+        // 0. 保存或更新会话表；内部主动提示不覆盖用户可见会话标题。
         try {
             userId = Integer.parseInt(request.getUserId());
-            Conversation conv = new Conversation();
-            conv.setId(conversationId);
-            conv.setUserId(userId);
-            conv.setRoleId(roleId);
-            String title = "新对话";
-            if (request.getMessage() != null && request.getMessage().length() > 0) {
-                title = request.getMessage().length() > 15 ? request.getMessage().substring(0, 15) + "..." : request.getMessage();
+            if (!request.isInternalTrigger()) {
+                Conversation conv = new Conversation();
+                conv.setId(conversationId);
+                conv.setUserId(userId);
+                conv.setRoleId(roleId);
+                String title = "新对话";
+                if (request.getMessage() != null && request.getMessage().length() > 0) {
+                    title = request.getMessage().length() > 15 ? request.getMessage().substring(0, 15) + "..." : request.getMessage();
+                }
+                conv.setTitle(title);
+                conversationMapper.insertOrUpdate(conv);
             }
-            conv.setTitle(title);
-            conversationMapper.insertOrUpdate(conv);
         } catch (Exception e) {
             log.error("保存会话失败", e);
         }
@@ -247,12 +239,17 @@ public class ChatServiceImpl implements ChatService {
             }
         }
 
-        // 5️⃣ 将纯文本用户消息加入 ChatMemory（自动持久化纯文本到 history 表，防止数据库和序列化报错）
-        chatMemory.add(UserMessage.from(textToSave));
+        // 5️⃣ 普通用户消息持久化；主动研究的内部提示只临时参与本轮推理。
+        if (!request.isInternalTrigger()) {
+            chatMemory.add(UserMessage.from(textToSave));
+        }
         // 6️⃣ 组装消息列表：系统指令对 + ChatMemory 历史消息
         List<ChatMessage> allMessages = new ArrayList<>();
         allMessages.add(dev.langchain4j.data.message.SystemMessage.from(sysPrompt.toString()));
         allMessages.addAll(chatMemory.messages());
+        if (request.isInternalTrigger()) {
+            allMessages.add(UserMessage.from(textToSave));
+        }
 
         // 7️⃣ 若当前请求包含图片，则临时替换最后一条消息为多模态内容，以便发送给具有视觉能力的模型分析
         if (hasImages) {
@@ -267,14 +264,14 @@ public class ChatServiceImpl implements ChatService {
         boolean useRag = !Boolean.FALSE.equals(request.getRag());     // null / true → 都开
         boolean useTools = !Boolean.FALSE.equals(request.getTools()); // null / true → 都开
 
-        // 技能预取 + 通用联网预搜索（SearXNG）；webSearch 工具仍可供模型自行调用
+        // 技能预取 + 通用联网预搜索（Search-RAG）；webSearch 工具仍可供模型自行调用
         List<ChatMessage> historyForSkills = new ArrayList<>(chatMemory.messages());
         injectPreSearch(skillRuntimeService.tryPreInject(
                 request.getMessage(), historyForSkills, useSearch, mcpClientManager), allMessages);
         if (useSearch && request.getMessage() != null
                 && !skillRuntimeService.shouldSkipGenericPreSearch(request.getMessage(), historyForSkills)) {
             injectPreSearch(skillRuntimeService.tryGenericWebPreSearch(
-                    request.getMessage(), useSearch, mcpClientManager), allMessages);
+                    request.getMessage(), historyForSkills, useSearch, request.getSearchProgressListener()), allMessages);
         }
         if (trace != null) trace.mark("context_pre_search");
 
@@ -303,7 +300,7 @@ public class ChatServiceImpl implements ChatService {
         }
         if (trace != null) trace.mark("context_rag");
 
-        // MCP 工具调用（默认开；Gemma4 原生支持）：聚合所有已启用 MCP 服务器的工具（含 SearXNG webSearch）
+        // 工具调用（默认开；Gemma4 原生支持）：聚合本地 webSearch 与所有已启用 MCP 服务器的工具
         List<ToolSpecification> localToolSpecs = useTools ? getMcpToolSpecs() : List.of();
 
         allMessages = normalizeMessagesForChatTemplate(allMessages);
@@ -322,7 +319,8 @@ public class ChatServiceImpl implements ChatService {
             AtomicBoolean llmFirstToken = new AtomicBoolean(false);
             doStreamToolLoop(finalMessages, localToolSpecs, chatMemory, conversationId,
                     finalUserId, finalRoleId, sink, new StringBuilder(), 1, finalCurrentStreamingChatModel,
-                    request.getMessage(), memosChatHistory, finalTrace, llmFirstToken, finalStreamId);
+                    request.isInternalTrigger() ? null : request.getMessage(), memosChatHistory,
+                    finalTrace, llmFirstToken, finalStreamId, request.getAssistantCompleteListener());
         });
     }
 
@@ -340,7 +338,8 @@ public class ChatServiceImpl implements ChatService {
                                   List<Map<String, String>> memosChatHistory,
                                   LatencyTrace trace,
                                   AtomicBoolean llmFirstToken,
-                                  String streamId) {
+                                  String streamId,
+                                  java.util.function.Consumer<String> assistantCompleteListener) {
 
         dev.langchain4j.model.chat.request.ChatRequest.Builder reqBuilder =
                 dev.langchain4j.model.chat.request.ChatRequest.builder()
@@ -402,10 +401,14 @@ public class ChatServiceImpl implements ChatService {
                     if (trace != null) trace.mark("tool_round_" + round + "_done");
                     doStreamToolLoop(messages, toolSpecs, chatMemory, conversationId,
                             userId, roleId, sink, fullResponse, round + 1, currentStreamingChatModel, originalUserMessage,
-                            memosChatHistory, trace, llmFirstToken, streamId);
+                            memosChatHistory, trace, llmFirstToken, streamId, assistantCompleteListener);
                 } else if (!cancelled && fullResponse.length() > 0) {
                     String normalized = normalizeEmotionTags(fullResponse.toString());
                     chatMemory.add(AiMessage.from(normalized));
+                    if (assistantCompleteListener != null) {
+                        try { assistantCompleteListener.accept(normalized); }
+                        catch (Exception callbackError) { log.warn("助手完成回调失败: {}", callbackError.getMessage()); }
+                    }
                     sink.complete();
                     enqueueConversationTurnToMemos(conversationId, userId, roleId, originalUserMessage, normalized, memosChatHistory);
                     return;

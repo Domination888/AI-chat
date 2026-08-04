@@ -1,14 +1,19 @@
 <template>
-  <div v-if="show" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg w-full max-w-3xl mx-4 flex flex-col max-h-[88vh]">
+  <div v-if="show" :class="embedded ? 'w-full' : 'fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50'">
+    <div :class="embedded ? 'w-full flex flex-col min-h-[420px]' : 'bg-white dark:bg-gray-800 rounded-xl shadow-lg w-full max-w-3xl mx-4 flex flex-col max-h-[88vh]'">
       <!-- header -->
-      <div class="flex items-center justify-between p-4 border-b dark:border-gray-700">
+      <div v-if="!embedded" class="flex items-center justify-between p-4 border-b dark:border-gray-700">
         <h3 class="text-lg font-semibold dark:text-gray-100">扩展管理</h3>
         <button @click="$emit('close')" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
+      </div>
+
+      <div v-if="embedded" class="pb-4">
+        <h3 class="text-lg font-semibold dark:text-gray-100">扩展与技能</h3>
+        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">管理 MCP 服务器、工具连接与模型可用技能。</p>
       </div>
 
       <!-- tabs -->
@@ -32,7 +37,7 @@
         <!-- ===================== MCP 服务器 ===================== -->
         <div v-show="activeTab === 'mcp'">
           <div class="flex justify-between items-center mb-3">
-            <p class="text-xs text-gray-400">联网搜索由内置的 SearXNG MCP 提供（webSearch 工具）。可在此添加更多本地/远程 MCP 服务器。</p>
+            <p class="text-xs text-gray-400">联网搜索由后端 Search-RAG 提供（webSearch 工具）。可在此添加更多本地/远程 MCP 服务器。</p>
             <button @click="newServer" class="text-xs bg-blue-500 text-white rounded-md px-3 py-1.5 hover:bg-blue-600">+ 添加服务器</button>
           </div>
 
@@ -208,7 +213,10 @@ import { ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiFetch } from '../utils/api.js'
 
-const props = defineProps({ show: { type: Boolean, default: false } })
+const props = defineProps({
+  show: { type: Boolean, default: false },
+  embedded: { type: Boolean, default: false }
+})
 defineEmits(['close'])
 
 const tabs = [

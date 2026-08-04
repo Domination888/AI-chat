@@ -33,4 +33,13 @@
         DELETE FROM history WHERE id = #{id}
     </delete>
 
+    <select id="findRecentUserMessagesByUserId" resultType="org.example.aichat.dto.History">
+        SELECT * FROM (
+            SELECT h.* FROM history h
+            INNER JOIN conversation c ON c.id = h.conversation_id
+            WHERE c.user_id = #{userId} AND h.sender = 'user'
+            ORDER BY h.id DESC LIMIT #{limit}
+        ) t ORDER BY t.id ASC
+    </select>
+
 </mapper>

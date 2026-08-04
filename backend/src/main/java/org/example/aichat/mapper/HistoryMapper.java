@@ -22,4 +22,7 @@ public interface HistoryMapper {
     void deleteByConversationId(@Param("conversationId") String conversationId);
 
     void deleteById(@Param("id") String id);
+
+    List<History> findRecentUserMessagesByUserId(@Param("userId") Integer userId,
+                                                  @Param("limit") int limit);
 }

@@ -17,7 +17,7 @@ import java.util.Optional;
 
 /**
  * MCP 服务器配置的持久化层：读写 config/mcp-servers.json。
- * 首次启动若文件不存在，则写入内置默认项（searxng 联网搜索 + prime 示例）。
+ * 首次启动若文件不存在，则写入内置默认项。联网搜索已迁移到后端 Search-RAG，不再注册 MCP 工具。
  */
 @Slf4j
 @Component
@@ -41,6 +41,7 @@ public class McpServerStore {
             saveAll(defaults());
         } else {
             log.info("加载 MCP 配置: {}", file);
+            removeLegacyBuiltinSearch();
         }
     }
 
@@ -132,6 +133,23 @@ public class McpServerStore {
         }
     }
 
+    private void removeLegacyBuiltinSearch() {
+        synchronized (lock) {
+            Path file = appPaths.mcpServersFile();
+            try {
+                McpServerConfig[] arr = MAPPER.readValue(Files.readAllBytes(file), McpServerConfig[].class);
+                List<McpServerConfig> configs = new ArrayList<>(List.of(arr));
+                boolean removed = configs.removeIf(c -> "searxng".equals(c.getId()) && c.isBuiltin());
+                if (removed) {
+                    saveAll(configs);
+                    log.info("已移除旧的内置 SearXNG MCP；联网搜索改由后端 Search-RAG 提供");
+                }
+            } catch (IOException e) {
+                log.warn("迁移旧 SearXNG MCP 配置失败: {}", e.getMessage());
+            }
+        }
+    }
+
     private String generateId(String name) {
         String base = (name == null || name.isBlank()) ? "mcp" : name.trim().toLowerCase()
                 .replaceAll("[^a-z0-9]+", "-").replaceAll("(^-+|-+$)", "");
@@ -154,26 +172,9 @@ public class McpServerStore {
         List<McpServerConfig> list = new ArrayList<>();
         boolean packaged = appPaths.isPackagedLayout();
         String javaCmd = packaged ? appPaths.bundledJavaCommand() : "java";
-        String searxngJar = packaged
-                ? "mcp/searxng-mcp-server-1.0.0.jar"
-                : "services/searxng-mcp-server/target/searxng-mcp-server-1.0.0.jar";
         String primeJar = packaged
                 ? "mcp/prime-mcp-server-1.0.0.jar"
                 : "services/prime-mcp-server/target/prime-mcp-server-1.0.0.jar";
-
-        McpServerConfig searxng = new McpServerConfig();
-        searxng.setId("searxng");
-        searxng.setName("SearXNG 联网搜索");
-        searxng.setDescription("本地 SearXNG 元搜索引擎，提供 webSearch 工具（替代智谱 Web Search）");
-        searxng.setEnabled(true);
-        searxng.setBuiltin(true);
-        searxng.setTransport("stdio");
-        searxng.setCommand(new ArrayList<>(List.of(
-                javaCmd, "-jar",
-                searxngJar,
-                "--searxng-url", "http://localhost:8888"
-        )));
-        list.add(searxng);
 
         McpServerConfig prime = new McpServerConfig();
         prime.setId("prime");

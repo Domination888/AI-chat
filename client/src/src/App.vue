@@ -21,9 +21,22 @@
       </div>
     </div>
 
-    <!-- Sidebar -->
-    <div class="w-64 bg-gray-50 dark:bg-gray-800 border-r dark:border-gray-700 flex flex-col hidden md:flex">
+    <div
+      v-if="showMobileSidebar"
+      class="fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px] md:hidden"
+      @click="showMobileSidebar = false"
+    ></div>
+
+    <!-- Sidebar / mobile conversation drawer -->
+    <aside
+      class="fixed inset-y-0 left-0 z-50 w-72 md:relative md:z-auto md:w-64 bg-gray-50 dark:bg-gray-800 border-r dark:border-gray-700 flex flex-col transform transition-transform duration-200 md:translate-x-0"
+      :class="showMobileSidebar ? 'translate-x-0' : '-translate-x-full'"
+    >
       <div class="p-4 border-b dark:border-gray-700 space-y-3">
+        <div class="md:hidden flex items-center justify-between">
+          <span class="text-sm font-semibold dark:text-gray-100">对话</span>
+          <button @click="showMobileSidebar = false" class="w-8 h-8 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500" aria-label="关闭会话列表">✕</button>
+        </div>
         <!-- Role Selector -->
         <div>
           <button 
@@ -52,7 +65,7 @@
              class="group flex items-center justify-between px-3 py-3 text-sm rounded-md cursor-pointer transition-colors overflow-hidden"
              :class="currentConversationId === conv.id ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200 font-medium' : 'hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300'">
             <span class="truncate block flex-1">{{ conv.title || '新对话' }}</span>
-            <button @click.stop="deleteConversation(conv.id)" title="删除对话" class="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity ml-2 shrink-0">
+            <button @click.stop="deleteConversation(conv.id)" title="删除对话" class="text-gray-400 hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity ml-2 shrink-0">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
               </svg>
@@ -68,32 +81,23 @@
           <div class="text-sm font-medium truncate dark:text-gray-200">{{ user?.username }}</div>
         </div>
         <div class="grid grid-cols-2 gap-2">
-          <button @click="openSettings" class="text-xs border border-gray-300 dark:border-gray-600 rounded-md py-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition">
-            ⚙️ 设置
+          <button @click="openSettings" class="text-xs font-medium border border-gray-300 dark:border-gray-600 rounded-lg py-2 hover:bg-white dark:hover:bg-gray-700 transition">
+            ⚙ 设置中心
           </button>
-          <button @click="showMemories = true" class="text-xs border border-gray-300 dark:border-gray-600 rounded-md py-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition" title="管理已保存记忆">
-            🧠 记忆
-          </button>
-          <button @click="showLive2dControls = true" class="text-xs border border-gray-300 dark:border-gray-600 rounded-md py-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition" title="Live2D 动作与表情">
-            🎭 Live2D
-          </button>
-          <button @click="showExtensions = true" class="text-xs border border-gray-300 dark:border-gray-600 rounded-md py-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition" title="管理 MCP 服务器与技能">
-            🧩 扩展
-          </button>
-          <button v-if="isElectron" @click="showLogs = true" class="text-xs border border-gray-300 dark:border-gray-600 rounded-md py-1.5 hover:bg-gray-50 dark:hover:bg-gray-600 transition" title="查看系统日志">
-            📋 日志
-          </button>
-          <button @click="logout" class="text-xs text-gray-500 dark:text-gray-400 hover:text-red-500 border border-gray-300 dark:border-gray-600 rounded-md py-1.5 transition" :class="{ 'col-span-2': !isElectron }">
+          <button @click="logout" class="text-xs text-gray-500 dark:text-gray-400 hover:text-red-500 border border-gray-300 dark:border-gray-600 rounded-lg py-2 transition">
             退出
           </button>
         </div>
       </div>
-    </div>
+    </aside>
 
     <!-- Main Chat Area -->
     <div class="flex-1 flex flex-col relative min-h-0">
       <!-- Header -->
-      <div class="h-14 border-b dark:border-gray-700 flex items-center px-4 justify-between bg-white dark:bg-gray-800 md:hidden">
+      <div class="h-14 border-b dark:border-gray-700 flex items-center px-3 justify-between bg-white/95 dark:bg-gray-800/95 md:hidden shrink-0">
+        <button @click="showMobileSidebar = true" class="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700" aria-label="打开会话列表">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" /></svg>
+        </button>
         <button 
           @click="showRoleSelector = true"
           class="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300"
@@ -103,16 +107,21 @@
           </div>
           <span class="truncate max-w-[120px]">{{ selectedRole?.name || '选择角色' }}</span>
         </button>
-        <div v-if="user" @click="logout" class="text-xs text-gray-500 dark:text-gray-400 cursor-pointer shrink-0 ml-4">退出</div>
+        <button @click="openSettings" class="w-9 h-9 flex items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700" aria-label="打开设置">⚙</button>
       </div>
 
       <!-- Messages List -->
-      <div class="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 no-scrollbar min-h-0" id="chat-container">
-        <div v-if="messages.length === 0" class="h-full flex flex-col items-center justify-center text-gray-400 dark:text-gray-500">
-          <div class="text-4xl mb-4 text-gray-300 dark:text-gray-600">👋</div>
-          <h2 class="text-xl font-semibold mb-2">有什么我可以帮您的？</h2>
-          <p class="text-sm mb-1">现在正在使用体验角色：<span class="text-blue-500 font-bold">{{ selectedRole?.name || '未知角色' }}</span></p>
-          <p class="text-xs">按住麦克风说话，使用声音沟通！</p>
+      <div class="flex-1 overflow-y-auto p-4 md:p-8 no-scrollbar min-h-0 bg-gray-50/40 dark:bg-gray-900/40" id="chat-container">
+        <div class="max-w-4xl mx-auto w-full min-h-full space-y-6">
+        <div v-if="messages.length === 0" class="min-h-[60vh] flex flex-col items-center justify-center text-center text-gray-400 dark:text-gray-500 px-4">
+          <div class="w-14 h-14 mb-5 rounded-2xl bg-gradient-to-br from-blue-500 to-violet-500 text-white flex items-center justify-center text-2xl shadow-lg shadow-blue-500/20">✦</div>
+          <h2 class="text-xl font-semibold mb-2 text-gray-700 dark:text-gray-200">开始一段新对话</h2>
+          <p class="text-sm mb-5">正在与 <span class="text-blue-600 dark:text-blue-400 font-medium">{{ selectedRole?.name || '当前角色' }}</span> 对话</p>
+          <div class="flex flex-wrap justify-center gap-2 text-xs">
+            <span class="px-3 py-1.5 rounded-full bg-white dark:bg-gray-800 border dark:border-gray-700">支持图片</span>
+            <span class="px-3 py-1.5 rounded-full bg-white dark:bg-gray-800 border dark:border-gray-700">语音交互</span>
+            <span class="px-3 py-1.5 rounded-full bg-white dark:bg-gray-800 border dark:border-gray-700">按需联网</span>
+          </div>
         </div>
         
         <div v-for="(msg, index) in messages" :key="index" class="flex gap-4" :class="{'flex-row-reverse': msg.role === 'user'}">
@@ -137,11 +146,31 @@
             </div>
 
             <div style="white-space: pre-wrap; word-wrap: break-word;">{{ msg.content }}</div>
+
+            <div v-if="msg.searchStatus" class="mt-2 text-xs text-emerald-600 dark:text-emerald-400">
+              🔎 {{ msg.searchStatus }}
+            </div>
+
+            <div v-if="msg.sources?.length" class="mt-3 space-y-1.5 border-t border-gray-200 dark:border-gray-600 pt-2">
+              <div class="text-xs font-medium text-gray-500 dark:text-gray-400">来源</div>
+              <a v-for="(source, sourceIndex) in msg.sources" :key="source.url || sourceIndex"
+                 :href="source.url" target="_blank" rel="noopener noreferrer"
+                 class="block text-xs text-blue-600 dark:text-blue-400 hover:underline truncate">
+                [{{ sourceIndex + 1 }}] {{ source.title || source.url }}
+              </a>
+            </div>
+
+            <div v-if="msg.candidateId && !msg.feedback" class="mt-2 flex gap-2">
+              <button @click="sendProactiveFeedback(msg, 'interested')" class="text-xs px-2 py-1 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300">感兴趣</button>
+              <button @click="sendProactiveFeedback(msg, 'less_like')" class="text-xs px-2 py-1 rounded bg-gray-200 text-gray-600 dark:bg-gray-600 dark:text-gray-300">少推此类</button>
+            </div>
+            <div v-else-if="msg.feedback" class="mt-2 text-xs text-gray-400">已反馈：{{ msg.feedback === 'interested' ? '感兴趣' : '少推此类' }}</div>
             
             <button v-if="msg.audioUrl && msg.role === 'ai'" @click="playAudio(msg.audioUrl)" class="mt-2 text-xs bg-pink-100 dark:bg-pink-900 hover:bg-pink-200 dark:hover:bg-pink-800 text-pink-700 dark:text-pink-300 py-1 px-2 rounded flex items-center gap-1 transition">
               ▶ 播放语音
             </button>
           </div>
+        </div>
         </div>
       </div>
 
@@ -149,7 +178,7 @@
       <div class="bg-white dark:bg-gray-800 pt-4 pb-6 px-4 md:px-8 border-t border-gray-100 dark:border-gray-700 flex-shrink-0">
         <div class="max-w-3xl mx-auto flex flex-col gap-2">
           
-          <div class="flex items-center justify-between px-2">
+          <div class="flex flex-wrap items-center justify-between gap-2 px-1 sm:px-2">
             <div class="flex items-center gap-2">
               <button @click="toggleVoiceMode" class="text-xs px-3 py-1 rounded-full transition" :class="isVoiceMode ? 'bg-pink-500 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300'">
                 {{ isVoiceMode ? '🎙️ 按住说话模式' : '⌨️ 键盘输入模式' }}
@@ -165,7 +194,7 @@
             <!-- Toggles：仅展示"联网"。RAG 和本地工具默认常开（详见 PLAN-001） -->
             <div class="flex items-center gap-5">
 
-              <!-- Web Search：联网搜索（本地 SearXNG MCP），默认关闭，由用户手动开启 -->
+              <!-- Web Search：后端 Search-RAG，默认关闭，由用户手动开启 -->
               <label class="flex items-center cursor-pointer select-none" title="联网搜索（本地 SearXNG）">
                 <span class="mr-2 text-xs font-medium transition-colors"
                       :class="useSearch ? 'text-emerald-600' : 'text-gray-500 dark:text-gray-400'">联网</span>
@@ -213,7 +242,7 @@
                 </button>
                 <textarea
                   v-model="inputRaw"
-                  @keydown.enter.prevent="sendMessage"
+                  @keydown.enter.exact.prevent="sendMessage"
                   class="w-full max-h-48 min-h-[56px] py-4 pl-2 pr-12 bg-transparent border-none focus:ring-0 resize-none outline-none text-sm"
                   placeholder="发送消息... (Shift + Enter 换行)"
                   rows="1"
@@ -243,44 +272,24 @@
     @done="onSetupComplete"
   />
 
-  <!-- 设置模态框 -->
-  <McpSkillManager
-    :show="showExtensions"
-    @close="showExtensions = false"
-  />
-
   <SettingsModal 
     :show="showSettings"
     :initial-settings="settings"
+    :user-id="user?.id || null"
+    :current-role-id="selectedRole?.id || null"
+    :is-electron="isElectron"
     @close="showSettings = false"
     @save="handleSettingsSave"
     ref="settingsModal"
   />
 
-  <MemoryManagerModal
-    :show="showMemories"
-    :memos-enabled="settings.memosEnabled"
-    :current-role-id="selectedRole?.id || null"
-    @close="showMemories = false"
-  />
-
-  <Live2DControlModal
-    :show="showLive2dControls"
-    @close="showLive2dControls = false"
-  />
-
-  <LogViewerModal
-    :show="showLogs"
-    @close="showLogs = false"
-  />
-  
   <!-- 角色选择器模态框 -->
   <div v-if="showRoleSelector" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
     <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg w-full max-w-4xl mx-4 max-h-[80vh] overflow-hidden">
       <RoleCardSelector 
         :roles="roles"
         :selected-role-id="selectedRole?.id || null"
-        @select="(role) => { selectedRole = role; showRoleSelector = false; onRoleChange(); }"
+        @select="(role) => { selectedRole = role; showRoleSelector = false; showMobileSidebar = false; onRoleChange(); }"
         @close="showRoleSelector = false"
       />
     </div>
@@ -294,10 +303,6 @@
 import { ref, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import SettingsModal from './components/SettingsModal.vue'
-import MemoryManagerModal from './components/MemoryManagerModal.vue'
-import Live2DControlModal from './components/Live2DControlModal.vue'
-import LogViewerModal from './components/LogViewerModal.vue'
-import McpSkillManager from './components/McpSkillManager.vue'
 import RoleCardSelector from './components/RoleCardSelector.vue'
 import Live2DCanvas from './components/Live2DCanvas.vue'
 import { live2dController } from './live2d/live2d-controller.js'
@@ -309,7 +314,7 @@ const inputRaw = ref('')
 const messages = ref([])
 const loading = ref(false)
 
-// 联网搜索：默认关，由用户手动 toggle（开启时强制走一次 SearXNG 搜索并注入；关闭时模型仍可自行调用 webSearch 工具）
+// 联网搜索：默认关，由用户手动 toggle（开启时强制走一次 Search-RAG 并注入；关闭时模型仍可自行调用 webSearch 工具）
 const useSearch = ref(false)
 
 const toggleSearch = () => {
@@ -382,12 +387,9 @@ const normalizeProactiveIdleSeconds = (value) => {
 // 设置相关
 const showSettings = ref(false)
 const showSetupWizard = ref(false)
-const showExtensions = ref(false)
-const showLogs = ref(false)
-const showMemories = ref(false)
-const showLive2dControls = ref(false)
 const isElectron = !!window.electronAPI
 const showRoleSelector = ref(false)
+const showMobileSidebar = ref(false)
 const settings = ref({ ...DEFAULT_SETTINGS })
 
 const doLogin = async () => {
@@ -472,6 +474,7 @@ const loadConversations = async () => {
 }
 
 const selectConversation = async (id) => {
+  showMobileSidebar.value = false
   if (loading.value) await abortCurrentChat()
   else stopCurrentAudio()
   chatRequestSeq++
@@ -480,13 +483,31 @@ const selectConversation = async (id) => {
   await unregisterProactiveChat()
   currentConversationId.value = id
   try {
-    const res = await apiFetch(`/api/conversation/${id}/history`)
+    const [res, proactiveRes] = await Promise.all([
+      apiFetch(`/api/conversation/${id}/history`),
+      apiFetch(`/api/proactive-research/conversation/${id}`)
+    ])
     const data = await res.json()
+    const candidates = proactiveRes.ok ? await proactiveRes.json() : []
+    const candidateByResponse = new Map((candidates || []).filter(c => c.responseText).map(c => [c.responseText, c]))
     // 后端 History 字段映射: sender → role, content → content
-    messages.value = (data || []).map(h => ({
-      role: h.sender === 'assistant' ? 'ai' : h.sender,
-      content: h.content || ''
-    }))
+    messages.value = (data || [])
+      .filter(h => !(h.sender === 'user' && String(h.content || '').startsWith('[System: 用户')))
+      .map(h => {
+        const candidate = h.sender === 'assistant' ? candidateByResponse.get(h.content || '') : null
+        let sources = []
+        if (candidate?.sourcesJson) {
+          try { sources = JSON.parse(candidate.sourcesJson) } catch {}
+        }
+        return {
+          role: h.sender === 'assistant' ? 'ai' : h.sender,
+          content: h.content || '',
+          isProactive: !!candidate,
+          candidateId: candidate?.id || null,
+          sources,
+          feedback: candidate?.feedback || null
+        }
+      })
     scrollToBottom()
   } catch (e) {
     console.error('加载对话消息失败', e)
@@ -497,6 +518,7 @@ const selectConversation = async (id) => {
 }
 
 const newChat = async () => {
+  showMobileSidebar.value = false
   if (loading.value) await abortCurrentChat()
   else stopCurrentAudio()
   chatRequestSeq++
@@ -1360,6 +1382,12 @@ const doChatSSE = async (requestBody, userMsgIndex, aiMsgIndex) => {
         messages.value[userMsgIndex].isAudio = false
       } else if (evName === 'emotion') {
         live2dController.triggerEmotion(payload.emotion)
+      } else if (evName === 'search_status') {
+        messages.value[aiMsgIndex].searchStatus = payload.stage === 'complete' ? '' : (payload.message || '正在联网检索')
+        if (Array.isArray(payload.sources) && payload.sources.length) {
+          messages.value[aiMsgIndex].sources = payload.sources
+        }
+        scrollToBottom()
       } else if (evName === 'text') {
         if (firstText && (payload.delta || '')) {
           markLatency(latencySession, 'client_first_text')
@@ -1467,6 +1495,7 @@ const playAudio = (url) => {
 
 // 设置相关方法
 const openSettings = () => {
+  showMobileSidebar.value = false
   showSettings.value = true
 }
 
@@ -1555,8 +1584,8 @@ let proactiveTtsPlaybackSession = null
  */
 
 /**
- * 点击 Live2D 模型互动时触发主动说话
- * 调用后端 /api/chat/proactive/trigger 接口，跳过空闲检查直接触发一次主动搭话
+ * 点击 Live2D 模型互动时触发主动对话决策。
+ * 后端会先判断旧话题状态：未结束则续聊，已结束才联网寻找新话题。
  */
 const triggerProactiveFromInteract = async () => {
   if (!currentConversationId.value || !user.value) {
@@ -1568,11 +1597,16 @@ const triggerProactiveFromInteract = async () => {
     return
   }
   try {
-    await apiFetch('/api/chat/proactive/trigger', {
+    const response = await apiFetch('/api/chat/proactive/trigger', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ conversationId: currentConversationId.value })
     })
+    const result = response.ok ? await response.json() : { triggered: false }
+    if (!result.triggered) {
+      console.warn('Live2D 主动对话被跳过', result.status || response.status)
+      live2dController.setMotionSoundEnabled(false)
+    }
   } catch (e) {
     console.warn('触发互动主动说话失败', e)
     live2dController.setMotionSoundEnabled(false)
@@ -1613,11 +1647,40 @@ const registerProactiveChat = async () => {
   const url = apiUrl(`/api/chat/proactive/stream?conversationId=${encodeURIComponent(currentConversationId.value)}`)
   proactiveEventSource = new EventSource(url)
 
+  proactiveEventSource.addEventListener('proactive_status', (e) => {
+    let payload = {}
+    try { payload = JSON.parse(e.data) } catch {}
+    if (payload.phase === 'no_reliable_topic' || payload.phase === 'search_unavailable') {
+      if (payload.trigger === 'live2d') {
+        messages.value.push({
+          role: 'ai',
+          content: payload.phase === 'search_unavailable'
+            ? '我刚想联网找点新话题，但现在检索服务暂时不可用。'
+            : '我刚刚联网找了找，不过暂时没有找到足够可靠、适合聊的新内容。',
+          isProactive: true,
+          proactiveMode: 'research_unavailable',
+          proactiveTrigger: 'live2d'
+        })
+        scrollToBottom()
+      }
+      live2dController.setMotionSoundEnabled(false)
+    }
+  })
+
   proactiveEventSource.addEventListener('proactive', (e) => {
     proactiveTtsPlaybackSession = createTtsPlaybackSession()
     // 收到主动搭话标记 → 在消息列表中新增 AI 消息
+    let payload = {}
+    try { payload = JSON.parse(e.data) } catch {}
     const aiMsgIndex = messages.value.length
-    messages.value.push({ role: 'ai', content: '', isProactive: true })
+    messages.value.push({
+      role: 'ai', content: '', isProactive: true,
+      candidateId: payload.candidateId || null,
+      sources: Array.isArray(payload.sources) ? payload.sources : [],
+      proactiveReason: payload.reason || '',
+      proactiveMode: payload.mode || 'continuation',
+      proactiveTrigger: payload.trigger || 'timer'
+    })
     scrollToBottom()
     // 把当前 aiMsgIndex 关联到 proactive 会话
     proactiveAiMsgIndex = aiMsgIndex
@@ -1685,6 +1748,20 @@ const registerProactiveChat = async () => {
 }
 
 let proactiveAiMsgIndex = null  // 当前主动搭话的 AI 消息 index
+
+const sendProactiveFeedback = async (msg, feedback) => {
+  if (!msg?.candidateId || !user.value) return
+  try {
+    const resp = await apiFetch(`/api/proactive-research/candidates/${msg.candidateId}/feedback`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: user.value.id, feedback })
+    })
+    const data = await resp.json()
+    if (data.ok) msg.feedback = feedback
+  } catch (e) {
+    ElMessage.error('反馈保存失败')
+  }
+}
 
 /**
  * 注销主动搭话：调后端注销 + 关闭 SSE 长连接

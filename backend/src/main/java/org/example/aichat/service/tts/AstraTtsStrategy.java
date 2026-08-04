@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.aichat.config.VoiceProperties;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -20,6 +22,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
 /**
@@ -44,6 +47,29 @@ public class AstraTtsStrategy implements TtsStrategy {
     @Override
     public String engineName() { return "astra"; }
 
+    /**
+     * 应用就绪后主动切到实际音色并跑一次短句，消除首次对话中的参考音频加载、
+     * ONNX 内存分配和模型冷启动开销。失败不影响应用启动，正式请求仍会按原路径重试。
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public void warmUpSelectedVoice() {
+        CompletableFuture.runAsync(() -> {
+            long startedAt = System.currentTimeMillis();
+            try {
+                long bytes = ttsStream("你好。", voiceProps.getTtsDefaultProfile(), null, null, chunk -> { });
+                if (bytes > 0) {
+                    log.info("Astra TTS warmup done: bytes={}, cost={}ms", bytes,
+                            System.currentTimeMillis() - startedAt);
+                } else {
+                    log.warn("Astra TTS warmup failed: result={}, cost={}ms", bytes,
+                            System.currentTimeMillis() - startedAt);
+                }
+            } catch (Exception e) {
+                log.warn("Astra TTS warmup skipped: {}", e.getMessage());
+            }
+        });
+    }
+
     @Override
     public int outputSampleRate() { return 32000; }
 
@@ -67,11 +93,13 @@ public class AstraTtsStrategy implements TtsStrategy {
     public long ttsStream(String text, String voiceId, Double speedFactor, Double pitchFactor, Consumer<byte[]> chunkConsumer) {
         if (text == null || text.trim().isEmpty()) return 0;
 
+        long t0 = System.currentTimeMillis();
+
         // 解析 profile 获取 avatarId 和推理参数
         String avatarId = resolveAvatarId(voiceId);
         VoiceProperties.Profile profile = voiceProps.resolveProfile(voiceId);
+        long resolveMs = System.currentTimeMillis() - t0;
 
-        long t0 = System.currentTimeMillis();
         long total = 0;
         try {
             // 构造 /api/tts/predict-stream GET 查询参数
@@ -108,8 +136,10 @@ public class AstraTtsStrategy implements TtsStrategy {
                 sb.append("&languages=").append(URLEncoder.encode(profile.getTextLang(), StandardCharsets.UTF_8));
             }
 
-            // chunkSize：流式分片大小，默认 2048
-            int chunkSize = voiceProps.getAstraStreamingChunkSize();
+            // Astra 的 chunkSize 单位是语义 Token，不是 PCM 字节。
+            int configuredChunkSize = voiceProps.getAstraStreamingChunkSize();
+            int chunkSize = configuredChunkSize >= 4 && configuredChunkSize <= 128
+                    ? configuredChunkSize : 22;
             if (chunkSize > 0) {
                 sb.append("&chunkSize=").append(chunkSize);
             }
@@ -122,6 +152,7 @@ public class AstraTtsStrategy implements TtsStrategy {
                     .build();
 
             HttpResponse<InputStream> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofInputStream());
+            long headersMs = System.currentTimeMillis() - t0;
             if (resp.statusCode() != 200) {
                 String err = new String(resp.body().readAllBytes(), StandardCharsets.UTF_8);
                 log.error("Astra TTS 返回非 200: status={}, body={}", resp.statusCode(), err);
@@ -143,7 +174,9 @@ public class AstraTtsStrategy implements TtsStrategy {
                     total += n;
                 }
             }
-            log.info("TTS ok: engine=astra, avatarId={}, bytes={}, cost={}ms", avatarId, total, System.currentTimeMillis() - t0);
+            log.info("TTS ok: engine=astra, avatarId={}, bytes={}, resolve={}ms, headers={}ms, firstChunk={}ms, total={}ms, chunkTokens={}",
+                    avatarId, total, resolveMs, headersMs, firstChunkAt, System.currentTimeMillis() - t0,
+                    chunkSize);
             return total;
         } catch (Exception e) {
             log.error("Astra TTS 失败 (确保 Astra TTS 服务已启动: {})", voiceProps.getAstraTtsBaseUrl(), e);
@@ -157,8 +190,13 @@ public class AstraTtsStrategy implements TtsStrategy {
      */
     private String resolveAvatarId(String voiceId) {
         String configuredDefault = voiceProps.getAstraDefaultAvatarId();
-        if (StringUtils.hasText(configuredDefault) && avatarExistsOrUnknown(configuredDefault.trim())) {
+        if (StringUtils.hasText(configuredDefault)) {
             return configuredDefault.trim();
+        }
+
+        VoiceProperties.Profile profile = voiceProps.resolveProfile(voiceId);
+        if (profile != null && StringUtils.hasText(profile.getAstraAvatarId())) {
+            return profile.getAstraAvatarId().trim();
         }
 
         String discovered = discoverAvatarId(voiceId);
@@ -166,22 +204,7 @@ public class AstraTtsStrategy implements TtsStrategy {
             return discovered;
         }
 
-        VoiceProperties.Profile profile = voiceProps.resolveProfile(voiceId);
-        if (profile != null && StringUtils.hasText(profile.getAstraAvatarId())) {
-            String configured = profile.getAstraAvatarId().trim();
-            if (avatarExistsOrUnknown(configured)) {
-                return configured;
-            }
-            log.warn("Configured Astra avatarId '{}' is not available at {}, trying auto discovery",
-                    configured, voiceProps.getAstraTtsBaseUrl());
-        }
-
         return null;
-    }
-
-    private boolean avatarExistsOrUnknown(String avatarId) {
-        AvatarCache cache = loadAvatars();
-        return cache == null || cache.hasId(avatarId);
     }
 
     private String discoverAvatarId(String voiceId) {
@@ -257,15 +280,11 @@ public class AstraTtsStrategy implements TtsStrategy {
                     }
                 }
             }
-            return new AvatarCache(true, avatars, now + Duration.ofMinutes(1).toMillis());
+            return new AvatarCache(true, avatars, now + Duration.ofMinutes(10).toMillis());
         }
 
         private static AvatarCache unavailable(long now) {
             return new AvatarCache(false, java.util.List.of(), now + Duration.ofSeconds(10).toMillis());
-        }
-
-        private boolean hasId(String id) {
-            return items.stream().anyMatch(a -> a.id().equals(id));
         }
 
         private String findByName(String name) {

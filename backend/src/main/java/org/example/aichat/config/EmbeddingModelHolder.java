@@ -33,13 +33,16 @@ public class EmbeddingModelHolder {
     }
 
     public synchronized void refresh() {
-        model = OpenAiEmbeddingModel.builder()
+        var builder = OpenAiEmbeddingModel.builder()
                 .baseUrl(embeddingProperties.getBaseUrl())
                 .modelName(embeddingProperties.getModelName())
                 .timeout(Duration.ofMillis(llmProperties.getReadTimeoutMs()))
                 .maxRetries(llmProperties.getMaxRetries())
-                .httpClientBuilder(new SpringRestClientBuilder())
-                .build();
+                .httpClientBuilder(new SpringRestClientBuilder());
+        if (embeddingProperties.getApiKey() != null && !embeddingProperties.getApiKey().isBlank()) {
+            builder.apiKey(embeddingProperties.getApiKey().trim());
+        }
+        model = builder.build();
         log.info("EmbeddingModel 已刷新: baseUrl={}, modelName={}",
                 embeddingProperties.getBaseUrl(), embeddingProperties.getModelName());
     }

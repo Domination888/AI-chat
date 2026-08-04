@@ -2,6 +2,9 @@ server:
   port: ${SERVER_PORT:8080}
 
 spring:
+  mvc:
+    async:
+      request-timeout: 0
   data:
     redis:
       host: 127.0.0.1
@@ -57,6 +60,15 @@ rag:
 
 llm:
   base-url: http://127.0.0.1:1234/v1
+  api-key: ${AI_CHAT_LLM_API_KEY:}
+  thinking-mode: auto
+  reasoning-effort: auto
+  utility-inherit-connection: true
+  utility-base-url: ""
+  utility-api-key: ""
+  utility-model-name: ""
+  utility-thinking-mode: disabled
+  utility-reasoning-effort: auto
   model-name: gemma4-e4b
   streaming-model-name: gemma4-e4b
   connect-timeout-ms: 3000
@@ -66,6 +78,7 @@ llm:
 embedding:
   base-url: http://127.0.0.1:1234/v1
   model-name: text-embedding-qwen3-embedding-4b
+  api-key: ""
 
 voice:
   asr-url: ${AI_CHAT_ASR_URL:http://127.0.0.1:9000/v1/audio/transcriptions}
@@ -74,9 +87,10 @@ voice:
   tts-engine: astra
   astra-tts-base-url: http://127.0.0.1:5000
   astra-default-avatar-id: ""
-  astra-streaming-chunk-size: 2048
+  astra-streaming-chunk-size: 22
   tts-timeout-ms: 60000
   tts-default-profile: shu
+
   tts-profiles:
     shu:
       display-name: "黍（默认）"
@@ -87,3 +101,20 @@ voice:
       top-k: 15
     m3_v1: { display-name: "m3(复用黍)", alias-of: shu }
     hiro_v1: { display-name: "二阶堂希罗(复用黍)", alias-of: shu }
+
+search:
+  research:
+    searxng-url: http://127.0.0.1:8888
+    query-planner-enabled: true
+    planner-timeout-ms: 5000
+    max-queries: 3
+    results-per-query: 10
+    fetch-pages: 5
+    max-sources: 3
+    page-timeout-ms: 8000
+    total-timeout-ms: 20000
+    max-response-bytes: 2097152
+    max-page-chars: 15000
+    result-cache-minutes: 15
+    page-cache-hours: 6
+    engines: brave,duckduckgo,bing,baidu,sogou,360search

@@ -1,0 +1,11 @@
+{
+  "capturedAt": "2026-07-22T09:23:45.178975+00:00",
+  "mode": "legacy-searxng-top3",
+  "caseCount": 10,
+  "precisionAt3": 0.28,
+  "coverageAt3": 0.8889,
+  "urlFormatValidity": 1.0,
+  "noResultAccuracy": 0.0,
+  "latencyP95Ms": 3573,
+  "notes": "旧版近似基线：SearXNG 合并结果直接取前三，不做原文读取或本地重排。Precision@3 仅以实际返回的 Top-3 来源为分母；非拒答用例若返回空结果，计一个未命中。"
+}

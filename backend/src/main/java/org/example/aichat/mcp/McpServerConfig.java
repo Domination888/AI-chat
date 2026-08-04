@@ -33,7 +33,7 @@ public class McpServerConfig {
     /** 传输方式：stdio | sse */
     private String transport = "stdio";
 
-    /** stdio：完整启动命令（如 ["java","-jar","xxx.jar","--searxng-url","http://localhost:8888"]） */
+    /** stdio：完整启动命令（如 ["java","-jar","mcp/example.jar"]） */
     private List<String> command = new ArrayList<>();
 
     /** stdio：环境变量 */
@@ -45,7 +45,7 @@ public class McpServerConfig {
     /** sse：自定义请求头（如鉴权） */
     private Map<String, String> headers = new LinkedHashMap<>();
 
-    /** 内置服务器（searxng / prime），不允许删除，只能启用/停用与改参 */
+    /** 内置服务器（如 prime），不允许删除，只能启用/停用与改参 */
     private boolean builtin = false;
 
     @JsonIgnore

@@ -9,6 +9,7 @@ import org.example.aichat.service.ChatService;
 import org.example.aichat.service.SentenceSplitter;
 import org.example.aichat.service.SinkRegistry;
 import org.example.aichat.service.ProactiveChatService;
+import org.example.aichat.service.ProactiveResearchService;
 import org.example.aichat.service.VoiceService;
 import org.example.aichat.util.LatencyLogger;
 import org.example.aichat.util.LatencyTrace;
@@ -27,6 +28,7 @@ import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.time.Duration;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
@@ -55,6 +57,7 @@ public class ChatController {
     private final VoiceService voiceService;
     private final SinkRegistry sinkRegistry;
     private final ProactiveChatService proactiveChatService;
+    private final ProactiveResearchService proactiveResearchService;
     private final LatencyLogger latencyLogger;
     private final ObjectMapper om = new ObjectMapper();
 
@@ -160,7 +163,8 @@ public class ChatController {
     }
 
     /**
-     * 立即触发一次主动搭话（跳过空闲检查），用于前端点击互动等场景。
+     * Live2D 点击触发主动对话决策（跳过空闲检查）。
+     * 后端仍会先判断旧话题是否结束，再决定续聊或联网寻找新话题。
      * 请求体: { conversationId }
      */
     @PostMapping("/proactive/trigger")
@@ -170,7 +174,8 @@ public class ChatController {
             return Map.of("success", false, "message", "conversationId 不能为空");
         }
         boolean triggered = proactiveChatService.triggerNow(conversationId);
-        return Map.of("success", triggered, "triggered", triggered);
+        return Map.of("success", triggered, "triggered", triggered,
+                "status", triggered ? "evaluating" : "skipped");
     }
 
     /**
@@ -191,15 +196,20 @@ public class ChatController {
 
     /**
      * 主动搭话 SSE 长连接：前端通过此端点持续监听主动搭话消息。
-     * 事件格式: event: proactive / text / done / interrupted / error
-     * 注意：使用 multicast sink，EventSource 重连时 getOrCreateProactiveSink 会自动重建。
+     * 事件格式: event: proactive_status / proactive / text / done / interrupted / error
+     * 注意：使用不会自动取消的 multicast sink，EventSource 重连时继续复用同一事件总线。
      */
     @GetMapping(value = "/proactive/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> proactiveStream(@RequestParam String conversationId) {
         Sinks.Many<ServerSentEvent<String>> sink = proactiveChatService.getOrCreateProactiveSink(conversationId);
-        return sink.asFlux()
+        Flux<ServerSentEvent<String>> heartbeat = Flux.interval(Duration.ZERO, Duration.ofSeconds(15))
+                .map(unused -> ServerSentEvent.<String>builder()
+                        .event("heartbeat")
+                        .data("{}")
+                        .build());
+        return Flux.merge(sink.asFlux(), heartbeat)
                 .doOnCancel(() -> {
-                    log.info("proactiveStream: 前端断开, conversationId={}（sink 保留，重连时重建）", conversationId);
+                    log.info("proactiveStream: 前端断开, conversationId={}（事件总线保留，等待重连）", conversationId);
                 });
     }
 
@@ -207,6 +217,7 @@ public class ChatController {
      * 文本输入：直接走 LLM 流式 + 可选 TTS 回播
      */
     private void handleTextInput(ChatRequest request, Sinks.Many<ServerSentEvent<String>> sink) {
+        proactiveResearchService.onUserMessage(parseUserId(request.getUserId()), request.getMessage());
         startLlmStreamWithTts(request, sink);
     }
 
@@ -235,6 +246,7 @@ public class ChatController {
 
                 // 2) 用 ASR 文本替换 message，走 LLM 流式 + TTS
                 request.setMessage(userText);
+                proactiveResearchService.onUserMessage(parseUserId(request.getUserId()), userText);
                 startLlmStreamWithTts(request, sink);
             } catch (Exception e) {
                 log.error("语音输入 ASR 失败", e);
@@ -242,6 +254,11 @@ public class ChatController {
                 sink.tryEmitComplete();
             }
         });
+    }
+
+    private Integer parseUserId(String value) {
+        try { return Integer.parseInt(value); }
+        catch (Exception e) { return 0; }
     }
 
     /**
@@ -393,6 +410,15 @@ public class ChatController {
         if (trace != null) {
             trace.meta("wantTts", wantTts);
         }
+        request.setSearchProgressListener(progress -> {
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("stage", progress.stage());
+            payload.put("message", progress.message());
+            if (progress.sources() != null && !progress.sources().isEmpty()) {
+                payload.put("sources", progress.sources());
+            }
+            sink.tryEmitNext(sse("search_status", jsonObj(payload)));
+        });
 
         // 语音场景优先首包速度：缩短最小句长
         SentenceSplitter splitter = wantTts ? new SentenceSplitter(6, 60) : null;

@@ -22,6 +22,19 @@ public class MemosProperties {
     private String asyncMode = "sync";
     private boolean fallbackToRag = true;
 
+    /** MemOS 记忆提取/总结模型是否继承辅助模型连接 */
+    private boolean modelInheritConnection = true;
+    private String modelBaseUrl = "";
+    private String modelApiKey = "";
+    private String modelName = "";
+
+    /** MemOS 向量模型是否继承应用的 RAG Embedding 连接 */
+    private boolean embeddingInheritConnection = true;
+    private String embeddingBaseUrl = "";
+    private String embeddingApiKey = "";
+    private String embeddingModelName = "";
+    private int embeddingDimension = 1024;
+
     /** 固定的 Memos user_id（UUID 格式），纯个人项目所有对话共享同一用户 */
     private String userId = "";
     /** 默认 writable cube IDs（逗号分隔），用于 /product/add */

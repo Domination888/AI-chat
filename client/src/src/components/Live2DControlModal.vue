@@ -1,7 +1,7 @@
 <template>
-  <div v-if="show" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg w-full max-w-2xl mx-4">
-      <div class="flex items-center justify-between p-4 border-b dark:border-gray-700">
+  <div v-if="show" :class="embedded ? 'w-full' : 'fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50'">
+    <div :class="embedded ? 'w-full' : 'bg-white dark:bg-gray-800 rounded-xl shadow-lg w-full max-w-2xl mx-4'">
+      <div v-if="!embedded" class="flex items-center justify-between p-4 border-b dark:border-gray-700">
         <h3 class="text-lg font-semibold dark:text-gray-100">Live2D</h3>
         <button @click="$emit('close')" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -10,7 +10,11 @@
         </button>
       </div>
 
-      <div class="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
+      <div :class="embedded ? 'space-y-5' : 'p-4 space-y-4 max-h-[70vh] overflow-y-auto'">
+        <div v-if="embedded">
+          <h3 class="text-lg font-semibold dark:text-gray-100">Live2D 形象</h3>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">预览动作与表情，并调整桌面形象显示大小。</p>
+        </div>
         <div>
           <div class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">动作</div>
           <div class="grid grid-cols-3 sm:grid-cols-4 gap-2">
@@ -61,7 +65,7 @@
         </div>
       </div>
 
-      <div class="p-4 border-t dark:border-gray-700 flex justify-end">
+      <div v-if="!embedded" class="p-4 border-t dark:border-gray-700 flex justify-end">
         <button @click="$emit('close')" class="px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:text-gray-300 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition">
           关闭
         </button>
@@ -75,7 +79,8 @@ import { ref } from 'vue'
 import { allLive2dExpressions, allLive2dMotions } from '../live2d/live2d-options.js'
 
 defineProps({
-  show: { type: Boolean, default: false }
+  show: { type: Boolean, default: false },
+  embedded: { type: Boolean, default: false }
 })
 
 defineEmits(['close'])

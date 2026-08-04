@@ -71,24 +71,19 @@ function getActivePorts() {
   return { ...activePorts };
 }
 
-function patchMcpSearxngUrl() {
-  const file = path.join(getUserConfigDir(), 'mcp-servers.json');
+function patchSearchRuntimeUrl() {
+  const file = path.join(getUserConfigDir(), 'runtime-config.json');
   if (!fs.existsSync(file)) return;
   try {
-    const list = JSON.parse(fs.readFileSync(file, 'utf8'));
-    let changed = false;
-    for (const cfg of list) {
-      if (cfg.id !== 'searxng' || !Array.isArray(cfg.command)) continue;
-      const url = `http://127.0.0.1:${activePorts.searxng}`;
-      const idx = cfg.command.indexOf('--searxng-url');
-      if (idx >= 0 && cfg.command[idx + 1] !== url) {
-        cfg.command[idx + 1] = url;
-        changed = true;
-      }
+    const config = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const url = `http://127.0.0.1:${activePorts.searxng}`;
+    config.search = config.search || {};
+    if (config.search.searxngUrl !== url) {
+      config.search.searxngUrl = url;
+      fs.writeFileSync(file, JSON.stringify(config, null, 2));
     }
-    if (changed) fs.writeFileSync(file, JSON.stringify(list, null, 2));
   } catch (e) {
-    console.warn('[port-manager] patch mcp-servers.json failed:', e.message);
+    console.warn('[port-manager] patch Search-RAG SearXNG URL failed:', e.message);
   }
 }
 
@@ -102,6 +97,7 @@ function portEnvExtras() {
     AI_CHAT_MEMOS_URL: `http://127.0.0.1:${p.memos}`,
     AI_CHAT_ASR_URL: `http://127.0.0.1:${p.asr}/v1/audio/transcriptions`,
     AI_CHAT_BACKEND_URL: `http://127.0.0.1:${p.backend}`,
+    SEARCH_RESEARCH_SEARXNG_URL: `http://127.0.0.1:${p.searxng}`,
     REDIS_PORT: String(p.redis),
     MYSQL_PORT: String(p.mysql),
     MEMOS_PORT: String(p.memos),
@@ -120,7 +116,7 @@ module.exports = {
   DEFAULT_PORTS,
   allocateAllPorts,
   getActivePorts,
-  patchMcpSearxngUrl,
+  patchSearchRuntimeUrl,
   portEnvExtras,
   isPortFree,
 };

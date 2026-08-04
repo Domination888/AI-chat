@@ -24,6 +24,9 @@ public class LlmConfigController {
     public static class LlmConfigDTO {
         private String baseUrl;
         private String modelName;
+        private String apiKey;
+        private String thinkingMode;
+        private String reasoningEffort;
     }
 
     @GetMapping
@@ -32,6 +35,9 @@ public class LlmConfigController {
         LlmConfigDTO dto = new LlmConfigDTO();
         dto.setBaseUrl(llm.getBaseUrl());
         dto.setModelName(llm.getModelName());
+        dto.setApiKey(llm.getApiKey());
+        dto.setThinkingMode(llm.getThinkingMode());
+        dto.setReasoningEffort(llm.getReasoningEffort());
         return ResponseEntity.ok(dto);
     }
 
@@ -41,6 +47,9 @@ public class LlmConfigController {
         RuntimeConfig.LlmSection llm = new RuntimeConfig.LlmSection();
         llm.setBaseUrl(dto.getBaseUrl());
         llm.setModelName(dto.getModelName());
+        llm.setApiKey(dto.getApiKey());
+        llm.setThinkingMode(dto.getThinkingMode());
+        llm.setReasoningEffort(dto.getReasoningEffort());
         if (dto.getModelName() != null && !dto.getModelName().isBlank()) {
             llm.setStreamingModelName(dto.getModelName());
         }

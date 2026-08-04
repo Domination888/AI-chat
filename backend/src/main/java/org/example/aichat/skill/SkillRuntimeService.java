@@ -4,11 +4,16 @@ import dev.langchain4j.data.message.ChatMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.aichat.mcp.McpClientManager;
+import org.example.aichat.search.SearchRequest;
+import org.example.aichat.search.SearchResponse;
+import org.example.aichat.search.WebSearchGateway;
+import org.example.aichat.search.SearchProgress;
 import org.example.aichat.util.WebSearchHelper;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 /**
  * 在对话请求入口，按已启用技能执行预取并生成可注入的上下文块。
@@ -20,6 +25,7 @@ public class SkillRuntimeService {
 
     private final SkillService skillService;
     private final AiDailySkillService aiDailySkillService;
+    private final WebSearchGateway webSearchGateway;
 
     public record PreInjection(String blockTitle, String body, String tailHint, String logTag) {
     }
@@ -33,7 +39,7 @@ public class SkillRuntimeService {
         }
 
         if (aiDailySkillService.isEnabled() && aiDailySkillService.matchesDailyQuestionOrFollowUp(message, history)) {
-            Optional<String> body = aiDailySkillService.buildNewsInjection(message, history, mcp);
+            Optional<String> body = aiDailySkillService.buildNewsInjection(message, history, webSearchGateway);
             if (body.isPresent() && !body.get().isBlank()) {
                 log.info("技能 ai-daily-juya 预取成功，长度={}", body.get().length());
                 return Optional.of(new PreInjection(
@@ -46,7 +52,7 @@ public class SkillRuntimeService {
         }
 
         if (WeatherSkillHandler.isEnabled(enabled) && WeatherSkillHandler.matches(message, history)) {
-            String body = WeatherSkillHandler.buildContext(message, history, supplementWebSearch, mcp);
+            String body = WeatherSkillHandler.buildContext(message, history, supplementWebSearch, webSearchGateway);
             if (body != null && !body.isBlank()) {
                 log.info("技能 weather-lookup 预取成功，长度={}", body.length());
                 return Optional.of(new PreInjection(
@@ -71,8 +77,9 @@ public class SkillRuntimeService {
                 || (aiDailySkillService.isEnabled() && aiDailySkillService.matchesDailyQuestionOrFollowUp(message, history));
     }
 
-    public Optional<PreInjection> tryGenericWebPreSearch(String message, boolean supplementWebSearch,
-                                                         McpClientManager mcp) {
+    public Optional<PreInjection> tryGenericWebPreSearch(String message, List<ChatMessage> history,
+                                                         boolean supplementWebSearch,
+                                                         Consumer<SearchProgress> progressListener) {
         if (!supplementWebSearch || !WebSearchHelper.shouldPreSearch(message)) {
             return Optional.empty();
         }
@@ -80,14 +87,19 @@ public class SkillRuntimeService {
             return Optional.empty();
         }
         String searchQuery = WebSearchHelper.optimizeQuery(message);
-        String searchResult = mcp.webSearch(searchQuery);
-        String body = WebSearchHelper.buildSearchContext(searchResult);
+        SearchResponse response = webSearchGateway.search(SearchRequest.builder()
+                .query(searchQuery)
+                .conversationContext(history == null ? List.of() : history.stream().map(Object::toString).toList())
+                .maxSources(3)
+                .progressListener(progressListener)
+                .build());
+        String body = response.getContextText();
         if (body == null || body.isBlank()) {
             return Optional.empty();
         }
         log.info("通用联网预搜索 query={}, 长度={}", searchQuery, body.length());
         return Optional.of(new PreInjection(
-                "【联网搜索结果】",
+                "【联网研究结果】",
                 body,
                 "请根据以上搜索结果直接回答用户问题，并引用相关来源；若与问题无关或为空，说明未能查到并勿编造来源。不要只回复「好的，我已了解」。",
                 "web-search"));

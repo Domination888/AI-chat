@@ -1,4 +1,7 @@
 spring:
+  mvc:
+    async:
+      request-timeout: 0
   data:
     redis:
       host: localhost
@@ -16,7 +19,7 @@ mybatis:
     map-underscore-to-camel-case: true
 
 # MCP 服务器不再写死在这里：改为配置驱动的注册中心（config/mcp-servers.json），
-# 可在前端「设置 - MCP 服务器」里增删改、热重载。联网搜索由本地 SearXNG MCP 提供（已去除智谱）。
+# 可在前端「设置 - MCP 服务器」里增删改、热重载。联网搜索由后端 Search-RAG 提供。
 app:
   # config 目录与项目根：留空自动推断（后端工作目录为 backend/ 时取其父目录）
   project-root: ""
@@ -79,6 +82,16 @@ llm:
   # Win 机 LM Studio (Gemma4-31B Dense, GGUF Q4/Q5, ctx_len=8192)，OpenAI 兼容；规则强约束：LLM 必须走 Win
   # 上下文长度策略：后端自管 prompt 装配，发到 LLM 的 token 控制在 7K 内，LM Studio 侧 ctx_len 配 8K 即可（不要拉到 256K）
   base-url: http://127.0.0.1:1234/v1
+  api-key: ${AI_CHAT_LLM_API_KEY:}
+  thinking-mode: auto
+  reasoning-effort: auto
+  # 内部总结、分类、兴趣提取与搜索规划默认复用主连接，但可选择更快、更便宜的独立模型
+  utility-inherit-connection: true
+  utility-base-url: ""
+  utility-api-key: ""
+  utility-model-name: ""
+  utility-thinking-mode: disabled
+  utility-reasoning-effort: auto
   model-name: gemma4-e4b
   streaming-model-name: gemma-4-31b-it
   # 连接超时给短一点，连不上秒失败；读超时给大模型留够吐字时间
@@ -93,6 +106,7 @@ embedding:
   # 见 .joycode/rules/00-hardware-and-deployment.md
   base-url: http://127.0.0.1:1234/v1
   model-name: text-embedding-qwen3-embedding-4b
+  api-key: ""
 
 voice:
   # SenseVoice 本机批处理接口（PLAN-002 已部署，launchd 托管）
@@ -106,12 +120,13 @@ voice:
   astra-tts-base-url: http://localhost:5000
   # 默认 avatarId 只作兜底；为空时后端会从当前 URL 的 /api/tts/avatars 自动发现黍音色
   astra-default-avatar-id: ""
-  # 流式分片大小（chunkSize 参数）
-  astra-streaming-chunk-size: 2048
+  # Astra 分片单位是语义 Token，不是 PCM 字节
+  astra-streaming-chunk-size: 22
   # 单次 TTS 超时（毫秒）
   tts-timeout-ms: 60000
   # 默认音色 profile（当角色卡 voice_id 没匹配到 profile 时用这个）
   tts-default-profile: shu
+
   # 音色库 —— key 必须和 role_card.voice_id 一致即可直接命中
   tts-profiles:
     shu:
@@ -125,3 +140,20 @@ voice:
     # 占位角色：暂时复用黍音色
     m3_v1: { display-name: "m3(复用黍)", alias-of: shu }
     hiro_v1: { display-name: "二阶堂希罗(复用黍)", alias-of: shu }
+
+search:
+  research:
+    searxng-url: http://127.0.0.1:8888
+    query-planner-enabled: true
+    planner-timeout-ms: 5000
+    max-queries: 3
+    results-per-query: 10
+    fetch-pages: 5
+    max-sources: 3
+    page-timeout-ms: 8000
+    total-timeout-ms: 20000
+    max-response-bytes: 2097152
+    max-page-chars: 15000
+    result-cache-minutes: 15
+    page-cache-hours: 6
+    engines: brave,duckduckgo,bing,baidu,sogou,360search

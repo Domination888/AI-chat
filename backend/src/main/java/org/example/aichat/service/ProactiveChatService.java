@@ -6,6 +6,9 @@ import org.example.aichat.dto.ChatRequest;
 import org.example.aichat.dto.RoleCard;
 import org.example.aichat.util.LatencyLogger;
 import org.example.aichat.util.LatencyTrace;
+import org.example.aichat.mapper.ProactiveCandidateMapper;
+import org.example.aichat.search.SearchSource;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -18,6 +21,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -45,10 +49,18 @@ public class ProactiveChatService {
     private final RoleCardService roleCardService;
     private final VoiceService voiceService;
     private final LatencyLogger latencyLogger;
+    private final ProactiveCandidateMapper proactiveCandidateMapper;
+    private final ConversationTopicStateService topicStateService;
+    private final ObjectProvider<ProactiveResearchService> proactiveResearchServiceProvider;
     private final ObjectMapper om = new ObjectMapper();
 
     /** 定时调度器 */
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
+    private final ExecutorService decisionExecutor = Executors.newFixedThreadPool(2, r -> {
+        Thread thread = new Thread(r, "proactive-decision-worker");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     /** conversationId → 定时任务 Future（用于取消） */
     private final Map<String, ScheduledFuture<?>> scheduledTasks = new ConcurrentHashMap<>();
@@ -65,35 +77,34 @@ public class ProactiveChatService {
     /** conversationId → 主动搭话是否正在生成 */
     private final Map<String, AtomicBoolean> proactiveGenerating = new ConcurrentHashMap<>();
 
+    /** conversationId → 是否正在判断话题状态/准备联网新话题 */
+    private final Map<String, AtomicBoolean> proactiveDeciding = new ConcurrentHashMap<>();
+
     /** conversationId → 主动搭话 LLM 取消标记 */
     private final Map<String, AtomicBoolean> proactiveCancelFlags = new ConcurrentHashMap<>();
-
-    /** conversationId → 最近一次主动搭话的 AI 回复（用于去重判断） */
-    private final Map<String, String> lastProactiveResponse = new ConcurrentHashMap<>();
 
     /** 主动搭话连续触发计数（用于递进式提示变化） */
     private final Map<String, Integer> proactiveCount = new ConcurrentHashMap<>();
 
-    /** 多样化主动搭话提示模板：避免每次都发相同 prompt 导致 LLM 输出重复 */
-    private static final List<String> PROACTIVE_PROMPT_TEMPLATES = List.of(
-            "[System: 用户长时间未说话，请根据上下文主动搭话，自然地延续对话]",
-            "[System: 用户沉默了一会儿，换个话题或角度主动搭话吧，不要重复之前说过的话]",
-            "[System: 用户还没回应，试着用一个新话题或新方式引起注意，说点和之前不同的内容]",
-            "[System: 用户仍然安静，换一种语气或聊一件小事来打破沉默，不要再说之前的话了]"
-    );
-
     public ProactiveChatService(SinkRegistry sinkRegistry, ChatService chatService, RoleCardService roleCardService,
-                                VoiceService voiceService, LatencyLogger latencyLogger) {
+                                VoiceService voiceService, LatencyLogger latencyLogger,
+                                ProactiveCandidateMapper proactiveCandidateMapper,
+                                ConversationTopicStateService topicStateService,
+                                ObjectProvider<ProactiveResearchService> proactiveResearchServiceProvider) {
         this.sinkRegistry = sinkRegistry;
         this.chatService = chatService;
         this.roleCardService = roleCardService;
         this.voiceService = voiceService;
         this.latencyLogger = latencyLogger;
+        this.proactiveCandidateMapper = proactiveCandidateMapper;
+        this.topicStateService = topicStateService;
+        this.proactiveResearchServiceProvider = proactiveResearchServiceProvider;
     }
 
     @PreDestroy
     public void shutdown() {
         scheduler.shutdownNow();
+        decisionExecutor.shutdownNow();
     }
 
     /**
@@ -109,6 +120,7 @@ public class ProactiveChatService {
         registrations.put(conversationId, reg);
         lastInteractionTimes.put(conversationId, System.currentTimeMillis());
         proactiveGenerating.putIfAbsent(conversationId, new AtomicBoolean(false));
+        proactiveDeciding.putIfAbsent(conversationId, new AtomicBoolean(false));
         proactiveCancelFlags.putIfAbsent(conversationId, new AtomicBoolean(false));
 
         cancelScheduledTask(conversationId);
@@ -129,6 +141,7 @@ public class ProactiveChatService {
         registrations.remove(conversationId);
         lastInteractionTimes.remove(conversationId);
         proactiveGenerating.remove(conversationId);
+        proactiveDeciding.remove(conversationId);
         proactiveCancelFlags.remove(conversationId);
         closeProactiveSink(conversationId);
         log.info("ProactiveChatService: 注销主动搭话, conversationId={}", conversationId);
@@ -174,16 +187,14 @@ public class ProactiveChatService {
      * 如果旧 sink 已 complete（currentSubscriberCount == 0），先移除再重建。
      */
     public Sinks.Many<ServerSentEvent<String>> getOrCreateProactiveSink(String conversationId) {
-        Sinks.Many<ServerSentEvent<String>> existing = proactiveSinks.get(conversationId);
-        // 如果 sink 存在且还有活跃订阅者，直接复用
-        if (existing != null && existing.currentSubscriberCount() > 0) {
-            return existing;
-        }
-        // sink 不存在或已 complete（无订阅者），需要（重建）
-        Sinks.Many<ServerSentEvent<String>> newSink = Sinks.many().multicast().onBackpressureBuffer();
-        proactiveSinks.put(conversationId, newSink);
-        log.info("ProactiveChatService: 创建/重建 proactive sink, conversationId={}", conversationId);
-        return newSink;
+        return proactiveSinks.computeIfAbsent(conversationId, id -> {
+            // autoCancel=false：EventSource 短暂断线后仍复用同一条事件总线。
+            // 断线期间最多缓冲 2048 个事件（包含 TTS 分片），避免结果被发到废弃 sink。
+            Sinks.Many<ServerSentEvent<String>> sink =
+                    Sinks.many().multicast().onBackpressureBuffer(2048, false);
+            log.info("ProactiveChatService: 创建持久 proactive sink, conversationId={}", id);
+            return sink;
+        });
     }
 
     /**
@@ -212,35 +223,118 @@ public class ProactiveChatService {
         // 如果已有活跃聊天 SSE 流（用户正在对话），不主动搭话
         if (sinkRegistry.hasActiveSink(conversationId)) return;
 
-        // 如果正在生成主动搭话，不重复触发
-        AtomicBoolean generating = proactiveGenerating.get(conversationId);
-        if (generating != null && generating.get()) return;
-
-        // 检查前端是否有长连接监听
-        Sinks.Many<ServerSentEvent<String>> proactiveSink = proactiveSinks.get(conversationId);
-        if (proactiveSink == null) return; // 前端没连，不搭话
-
-        log.info("ProactiveChatService: 用户空闲 {}s，发起主动搭话, conversationId={}", elapsed, conversationId);
-        doProactiveChat(conversationId, reg, proactiveSink);
+        log.info("ProactiveChatService: 用户空闲 {}s，开始主动对话决策, conversationId={}", elapsed, conversationId);
+        triggerProactiveDecision(conversationId, TriggerKind.TIMER);
     }
 
     /**
-     * 执行主动搭话：构建 ChatRequest 走 LLM 流式生成 + TTS，通过长连接 sink 推送给前端。
+     * 定时与 Live2D 点击共用的主动对话决策入口。
+     * 旧话题未结束时只续聊；旧话题结束后才允许从 Search-RAG 候选中开启新话题。
      */
-    private void doProactiveChat(String conversationId, ProactiveRegistration reg,
-                                  Sinks.Many<ServerSentEvent<String>> proactiveSink) {
-        // 递进式主动搭话计数，用于选择不同提示模板
-        int count = proactiveCount.merge(conversationId, 1, Integer::sum);
-        String proactivePrompt = buildDiversePrompt(reg.proactivePrompt, count);
-        doProactiveChatWithPrompt(conversationId, reg, proactiveSink, proactivePrompt, "AI 主动搭话");
+    private boolean triggerProactiveDecision(String conversationId, TriggerKind triggerKind) {
+        ProactiveRegistration reg = registrations.get(conversationId);
+        if (reg == null) {
+            log.info("主动对话决策跳过：会话未注册, conversationId={}", conversationId);
+            return false;
+        }
+        if (sinkRegistry.hasActiveSink(conversationId)) {
+            log.info("主动对话决策跳过：普通聊天仍在生成, conversationId={}", conversationId);
+            return false;
+        }
+
+        AtomicBoolean generating = proactiveGenerating.get(conversationId);
+        AtomicBoolean deciding = proactiveDeciding.get(conversationId);
+        if (generating == null || deciding == null || generating.get() || !deciding.compareAndSet(false, true)) {
+            log.info("主动对话决策跳过：已有主动任务, conversationId={}", conversationId);
+            return false;
+        }
+
+        Sinks.Many<ServerSentEvent<String>> proactiveSink = proactiveSinks.get(conversationId);
+        if (proactiveSink == null) {
+            deciding.set(false);
+            log.info("主动对话决策跳过：SSE 尚未建立, conversationId={}", conversationId);
+            return false;
+        }
+
+        long interactionAtStart = lastInteractionTimes.getOrDefault(conversationId, 0L);
+        decisionExecutor.execute(() -> {
+            try {
+                ProactiveResearchService research = proactiveResearchServiceProvider.getIfAvailable();
+                if (triggerKind == TriggerKind.TIMER && research != null && research.isQuietHoursNow()) {
+                    log.debug("主动对话处于静默时段, conversationId={}", conversationId);
+                    return;
+                }
+
+                ConversationTopicStateService.TopicStateResult state = topicStateService.classify(conversationId);
+                log.info("主动对话话题状态: conversationId={}, state={}, reason={}, trigger={}",
+                        conversationId, state.state(), state.reason(), triggerKind.wireValue);
+                if (!canStartAfterDecision(conversationId, interactionAtStart)) return;
+
+                if (state.isOpen()) {
+                    int count = proactiveCount.merge(conversationId, 1, Integer::sum);
+                    String prompt = buildContinuationPrompt(reg.proactivePrompt, count);
+                    doProactiveChatWithPrompt(conversationId, reg, proactiveSink, prompt,
+                            "自然延续当前话题", null, ConversationMode.CONTINUATION, triggerKind);
+                    return;
+                }
+
+                if (triggerKind == TriggerKind.TIMER && research != null
+                        && !research.isResearchedTopicCooldownElapsed(reg.userId)) {
+                    log.debug("联网主动话题仍在冷却中, conversationId={}", conversationId);
+                    return;
+                }
+                emitDecisionStatus(proactiveSink, "researching", triggerKind);
+                log.info("主动对话开始准备联网新话题, conversationId={}, userId={}", conversationId, reg.userId);
+                if (research == null) {
+                    emitDecisionStatus(proactiveSink, "search_unavailable", triggerKind);
+                    return;
+                }
+                ProactiveResearchService.PreparedTopic prepared = research.prepareTopicNow(reg.userId).orElse(null);
+                if (prepared == null || !canStartAfterDecision(conversationId, interactionAtStart)) {
+                    log.info("主动对话未找到可靠联网话题, conversationId={}, userId={}", conversationId, reg.userId);
+                    emitDecisionStatus(proactiveSink, "no_reliable_topic", triggerKind);
+                    return;
+                }
+                log.info("主动对话联网话题已就绪, conversationId={}, candidateId={}, title={}",
+                        conversationId, prepared.candidateId(), abbr(prepared.title()));
+                ProactiveTopic topic = new ProactiveTopic(prepared.candidateId(), "search-rag",
+                        prepared.title(), "", prepared.sources(), prepared.reason(), prepared.prompt());
+                boolean started = doProactiveChatWithPrompt(conversationId, reg, proactiveSink, topic.prompt(),
+                        "联网发现了一个新话题", topic, ConversationMode.RESEARCHED_TOPIC, triggerKind);
+                if (started && topic.candidateId() != null) {
+                    proactiveCandidateMapper.markDelivered(topic.candidateId(), conversationId);
+                }
+            } catch (Exception e) {
+                log.warn("主动对话决策失败, conversationId={}: {}", conversationId, e.getMessage());
+                proactiveSink.tryEmitNext(sse("error", jsonVal("message", "主动对话决策失败")));
+            } finally {
+                deciding.set(false);
+            }
+        });
+        return true;
     }
 
-    private void doProactiveChatWithPrompt(String conversationId, ProactiveRegistration reg,
-                                           Sinks.Many<ServerSentEvent<String>> proactiveSink,
-                                           String proactivePrompt, String eventMessage) {
+    private boolean canStartAfterDecision(String conversationId, long interactionAtStart) {
+        if (sinkRegistry.hasActiveSink(conversationId)) return false;
+        if (!registrations.containsKey(conversationId)) return false;
+        if (lastInteractionTimes.getOrDefault(conversationId, 0L) != interactionAtStart) return false;
         AtomicBoolean generating = proactiveGenerating.get(conversationId);
-        if (generating == null) return;
-        generating.set(true);
+        return generating != null && !generating.get();
+    }
+
+    private void emitDecisionStatus(Sinks.Many<ServerSentEvent<String>> sink, String phase, TriggerKind triggerKind) {
+        sink.tryEmitNext(sse("proactive_status", jsonObj(Map.of(
+                "phase", phase,
+                "trigger", triggerKind.wireValue))));
+    }
+
+    private boolean doProactiveChatWithPrompt(String conversationId, ProactiveRegistration reg,
+                                              Sinks.Many<ServerSentEvent<String>> proactiveSink,
+                                              String proactivePrompt, String eventMessage,
+                                              ProactiveTopic topic, ConversationMode mode,
+                                              TriggerKind triggerKind) {
+        AtomicBoolean generating = proactiveGenerating.get(conversationId);
+        if (generating == null || !generating.compareAndSet(false, true)) return false;
 
         AtomicBoolean cancelFlag = proactiveCancelFlags.get(conversationId);
         if (cancelFlag != null) cancelFlag.set(false);
@@ -267,6 +361,11 @@ public class ProactiveChatService {
         request.setSearch(false);
         request.setRag(true);
         request.setTools(false);
+        request.setInternalTrigger(true);
+        if (topic != null && topic.candidateId() != null) {
+            request.setAssistantCompleteListener(text -> proactiveCandidateMapper.saveResponse(
+                    topic.candidateId(), org.example.aichat.util.EmotionTagNormalizer.stripAllTags(text)));
+        }
         // 添加TTS配置
         if (voiceId != null) {
             request.setTtsVoiceId(voiceId);
@@ -280,10 +379,22 @@ public class ProactiveChatService {
         request.setLatencyTrace(trace);
 
         // 推送 proactive 标记事件
-        proactiveSink.tryEmitNext(sse("proactive", jsonVal("message", eventMessage)));
+        Map<String, Object> proactiveEvent = new HashMap<>();
+        proactiveEvent.put("message", eventMessage);
+        proactiveEvent.put("mode", mode.wireValue);
+        proactiveEvent.put("trigger", triggerKind.wireValue);
+        if (topic != null) {
+            proactiveEvent.put("candidateId", topic.candidateId());
+            proactiveEvent.put("title", topic.title());
+            proactiveEvent.put("reason", topic.reason());
+            proactiveEvent.put("sources", topic.sources() == null ? List.of() : topic.sources());
+            proactiveEvent.put("topic", topic.title());
+        }
+        proactiveSink.tryEmitNext(sse("proactive", jsonObj(proactiveEvent)));
 
         // 使用类似ChatController的完整流程：LLM流式 + 情绪标签处理 + TTS
         startLlmStreamWithTts(request, proactiveSink);
+        return true;
     }
 
     /**
@@ -365,12 +476,6 @@ public class ProactiveChatService {
                         latencyLogger.stageServerComplete(trace);
                     }
 
-                    // 记录本次回复用于下次去重
-                    String response = getFullResponseText(emotionBuf);
-                    if (!response.isEmpty()) {
-                        lastProactiveResponse.put(conversationId, response);
-                    }
-                    
                     if (isCancelled(conversationId)) {
                         proactiveSink.tryEmitNext(sse("interrupted", "{}"));
                     } else {
@@ -408,32 +513,18 @@ public class ProactiveChatService {
         return cancelFlag != null && cancelFlag.get();
     }
 
-    /**
-     * 获取完整的响应文本（用于记录）
-     */
-    private String getFullResponseText(EmotionTagBuffer emotionBuf) {
-        // 这里需要一个方法来获取完整响应，但由于EmotionTagBuffer是静态内部类，
-        // 我们需要重新构建文本。实际实现中可能需要修改EmotionTagBuffer来跟踪完整文本
-        return ""; // 简化处理，实际需要更复杂的实现
-    }
-
-    /**
-     * 构建多样化的主动搭话提示。
-     * 连续多次触发时使用不同模板，避免 LLM 因相同 prompt 生成重复回复。
-     * 如果最近一次主动搭话回复与本次提示高度相似，额外追加去重指令。
-     */
-    private String buildDiversePrompt(String basePrompt, int count) {
-        // 选择提示模板（循环使用）
-        int templateIdx = Math.min(count - 1, PROACTIVE_PROMPT_TEMPLATES.size() - 1);
-        String prompt = PROACTIVE_PROMPT_TEMPLATES.get(templateIdx % PROACTIVE_PROMPT_TEMPLATES.size());
-
-        // 如果用户自定义了 prompt 且是第一次触发，使用用户的 prompt
-        if (count == 1 && basePrompt != null && !basePrompt.isEmpty()
+    private String buildContinuationPrompt(String basePrompt, int count) {
+        StringBuilder prompt = new StringBuilder(
+                "[System: 当前话题尚未结束。请查看最近对话，以角色口吻自然接着刚才的具体内容说1-3句话。" +
+                        "不要换话题，不要引入新闻或声称刚刚联网搜索，也不要重复上一条回复。]");
+        if (basePrompt != null && !basePrompt.isBlank()
                 && !basePrompt.equals("[System: 用户长时间未说话，请根据上下文主动搭话，自然地延续对话]")) {
-            prompt = basePrompt;
+            prompt.append("\n主动对话偏好：").append(basePrompt);
         }
-
-        return prompt;
+        if (count > 1) {
+            prompt.append("\n这是连续第").append(count).append("次尝试续接，请换一种自然措辞。");
+        }
+        return prompt.toString();
     }
 
     private void cancelScheduledTask(String conversationId) {
@@ -692,58 +783,19 @@ public class ProactiveChatService {
      * @return true 表示成功触发，false 表示被跳过（有活跃对话/正在生成/未注册）
      */
     public boolean triggerNow(String conversationId) {
-        ProactiveRegistration reg = registrations.get(conversationId);
-        if (reg == null) return false;
-
-        // 如果已有活跃聊天 SSE 流（用户正在对话），不触发
-        if (sinkRegistry.hasActiveSink(conversationId)) return false;
-
-        // 如果正在生成主动搭话，不重复触发
-        AtomicBoolean generating = proactiveGenerating.get(conversationId);
-        if (generating != null && generating.get()) return false;
-
-        // 检查前端是否有长连接监听
-        Sinks.Many<ServerSentEvent<String>> proactiveSink = proactiveSinks.get(conversationId);
-        if (proactiveSink == null) return false;
-
-        log.info("ProactiveChatService: 手动触发主动搭话, conversationId={}", conversationId);
-        doProactiveChat(conversationId, reg, proactiveSink);
-        return true;
+        log.info("ProactiveChatService: Live2D 触发主动对话决策, conversationId={}", conversationId);
+        return triggerProactiveDecision(conversationId, TriggerKind.LIVE2D);
     }
 
-    /**
-     * 由定时/外部 skill 触发一个主动话题。只投递给当前活跃会话：
-     * 已注册主动搭话、有前端 SSE 监听，且最近交互时间最新。
-     */
-    public boolean triggerTopicForCurrent(ProactiveTopic topic) {
-        if (topic == null || topic.prompt() == null || topic.prompt().isBlank()) {
-            return false;
-        }
-        String conversationId = registrations.keySet().stream()
-                .filter(id -> {
-                    Sinks.Many<ServerSentEvent<String>> sink = proactiveSinks.get(id);
+    public List<ActiveTarget> activeTargets() {
+        return registrations.entrySet().stream()
+                .filter(entry -> {
+                    Sinks.Many<ServerSentEvent<String>> sink = proactiveSinks.get(entry.getKey());
                     return sink != null && sink.currentSubscriberCount() > 0;
                 })
-                .max((a, b) -> Long.compare(
-                        lastInteractionTimes.getOrDefault(a, 0L),
-                        lastInteractionTimes.getOrDefault(b, 0L)))
-                .orElse(null);
-        if (conversationId == null) return false;
-
-        ProactiveRegistration reg = registrations.get(conversationId);
-        if (reg == null) return false;
-        if (sinkRegistry.hasActiveSink(conversationId)) return false;
-
-        AtomicBoolean generating = proactiveGenerating.get(conversationId);
-        if (generating != null && generating.get()) return false;
-
-        Sinks.Many<ServerSentEvent<String>> proactiveSink = proactiveSinks.get(conversationId);
-        if (proactiveSink == null) return false;
-
-        log.info("ProactiveChatService: skill {} 触发主动话题, conversationId={}, title={}",
-                topic.sourceSkill(), conversationId, abbr(topic.title()));
-        doProactiveChatWithPrompt(conversationId, reg, proactiveSink, topic.prompt(), "AI 日报话题");
-        return true;
+                .map(entry -> new ActiveTarget(entry.getKey(), entry.getValue().userId, entry.getValue().roleId,
+                        lastInteractionTimes.getOrDefault(entry.getKey(), 0L)))
+                .toList();
     }
 
     /**
@@ -770,6 +822,32 @@ public class ProactiveChatService {
         }
     }
 
-    public record ProactiveTopic(String sourceSkill, String title, String summary, List<String> links, String prompt) {
+    public record ActiveTarget(String conversationId, Integer userId, Integer roleId, long lastInteractionAt) {
+    }
+
+    public record ProactiveTopic(Long candidateId, String sourceSkill, String title, String summary,
+                                 List<SearchSource> sources, String reason, String prompt) {
+    }
+
+    enum TriggerKind {
+        TIMER("timer"),
+        LIVE2D("live2d");
+
+        private final String wireValue;
+
+        TriggerKind(String wireValue) {
+            this.wireValue = wireValue;
+        }
+    }
+
+    enum ConversationMode {
+        CONTINUATION("continuation"),
+        RESEARCHED_TOPIC("researched_topic");
+
+        private final String wireValue;
+
+        ConversationMode(String wireValue) {
+            this.wireValue = wireValue;
+        }
     }
 }

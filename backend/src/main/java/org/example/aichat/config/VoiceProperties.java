@@ -30,8 +30,8 @@ public class VoiceProperties {
     private String astraTtsBaseUrl;
     /** Astra 默认 avatarId（兜底音色） */
     private String astraDefaultAvatarId = "";
-    /** Astra 流式分片大小（predict-stream chunkSize 参数） */
-    private int astraStreamingChunkSize = 2048;
+    /** Astra 后续流式分片的语义 Token 数（不是 PCM 字节数） */
+    private int astraStreamingChunkSize = 22;
     private int ttsTimeoutMs = 60000;
     private String ttsDefaultProfile = "shu";
 

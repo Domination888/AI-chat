@@ -12,7 +12,7 @@
 | MySQL / Redis 便携版 | |
 | MemOS Python 服务 | |
 | SearXNG Python 服务 | |
-| SearXNG MCP / Prime MCP JAR | |
+| Prime MCP JAR | |
 
 LLM、Embedding、TTS 不随包分发，首次启动向导和设置页会写入 `runtime-config.json`。
 
@@ -21,10 +21,11 @@ LLM、Embedding、TTS 不随包分发，首次启动向导和设置页会写入 
 - JDK 17+，并配置 `JAVA_HOME`。
 - Node 18+。
 - Python 3.10+。
+- Git（准备无 Docker 的打包版 SearXNG 官方源码时需要）。
 - Maven 使用 `backend/mvnw`。
 - `packaging/cache/<platform>/` 中准备好便携版 `redis`、`mysql`、`jre`，可选 `neo4j`、`qdrant`。
 - ASR 模型在 `packaging/cache/asr-models/`。
-- MemOS / SearXNG 模板若需要随包运行，应提前准备 venv。
+- MemOS 模板若需要随包运行，应提前准备 venv；SearXNG 需运行 `packaging/templates/searxng/setup-venv.sh`（Windows 为 `.bat`），该脚本会拉取官方源码并安装其依赖，避免安装到 PyPI 上的同名 MCP 包。
 
 ## 一键打包
 
@@ -35,7 +36,7 @@ LLM、Embedding、TTS 不随包分发，首次启动向导和设置页会写入 
 
 脚本会依次执行：
 
-1. `scripts/build-all.sh`：构建 MCP JAR、后端 JAR、前端 dist。
+1. `scripts/build-all.sh`：构建 Prime MCP JAR、后端 JAR、前端 dist。
 2. 检查或下载 ASR 模型。
 3. `packaging/stage-runtime.sh <platform>`：组装 `packaging/staging/<platform>`。
 4. `electron-builder`：输出到 `client/release/`。
@@ -137,10 +138,10 @@ test -x packaging/staging/mac/asr/ffmpeg
 
 ### 联网搜索不可用
 
-检查 SearXNG 服务和 MCP JAR：
+确认 SearXNG JSON 接口可用；后端 Search-RAG 会直接访问它，不再经过 SearXNG MCP：
 
 ```bash
-ls packaging/staging/mac/mcp/searxng-mcp-server-1.0.0.jar
+curl 'http://127.0.0.1:8888/search?q=test&format=json'
 ```
 
 开发期还需要 Docker 能启动 `services/searxng/docker-compose.yml`。

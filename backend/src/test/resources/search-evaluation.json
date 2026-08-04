@@ -1,0 +1,59 @@
+[
+  {
+    "id": "zh-spring-official",
+    "query": "Spring Boot 3.5 官方文档",
+    "expectedDomains": ["spring.io", "docs.spring.io", "github.com"]
+  },
+  {
+    "id": "zh-vue-composition",
+    "query": "Vue 3 组合式 API 官方文档",
+    "expectedDomains": ["vuejs.org", "cn.vuejs.org"]
+  },
+  {
+    "id": "zh-apple-swift",
+    "query": "Apple Swift 并发官方文档",
+    "expectedDomains": ["developer.apple.com", "swift.org"]
+  },
+  {
+    "id": "en-openai-responses",
+    "query": "OpenAI Responses API official documentation",
+    "language": "en-US",
+    "expectedDomains": ["openai.com", "platform.openai.com", "developers.openai.com"]
+  },
+  {
+    "id": "en-docker-compose",
+    "query": "Docker Compose file official reference",
+    "language": "en-US",
+    "expectedDomains": ["docker.com", "docs.docker.com"]
+  },
+  {
+    "id": "en-mysql-reference",
+    "query": "MySQL 8.4 Reference Manual official documentation",
+    "language": "en-US",
+    "expectedDomains": ["mysql.com", "dev.mysql.com"]
+  },
+  {
+    "id": "zh-current-openai",
+    "query": "OpenAI 最近的官方产品更新",
+    "timeRange": "month",
+    "expectedDomains": ["openai.com", "developers.openai.com"]
+  },
+  {
+    "id": "zh-follow-up",
+    "query": "它的官方迁移指南呢",
+    "conversationContext": ["我正在从 React 18 升级到 React 19"],
+    "expectedDomains": ["react.dev"]
+  },
+  {
+    "id": "en-java-virtual-threads",
+    "query": "Java virtual threads official guide",
+    "language": "en-US",
+    "expectedDomains": ["oracle.com", "docs.oracle.com", "openjdk.org"]
+  },
+  {
+    "id": "no-reliable-result",
+    "query": "qzxwvtpklm9876543210",
+    "expectNoSources": true,
+    "expectedDomains": []
+  }
+]

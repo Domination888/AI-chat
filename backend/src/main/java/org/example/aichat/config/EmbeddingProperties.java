@@ -14,4 +14,6 @@ public class EmbeddingProperties {
 
     private String baseUrl = "http://127.0.0.1:1234/v1";
     private String modelName = "text-embedding-embeddinggemma-300m";
+    /** 外部 OpenAI 兼容 Embedding 服务的 API Key；本地服务可留空 */
+    private String apiKey = "";
 }

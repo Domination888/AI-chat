@@ -2359,3 +2359,12 @@ client/src/node_modules/
 /packaging/init-mysql.sh
 /packaging/populate-cache-mac.sh
 /packaging/stage-runtime.sh
+
+# 打包链路的源码配置需要纳入版本控制；仅 venv/cache/staging 等生成物继续忽略。
+!/packaging/stage-runtime.sh
+!/packaging/config/mcp-servers.json
+!/packaging/templates/searxng/settings.yml
+!/packaging/templates/searxng/setup-venv.sh
+!/packaging/templates/searxng/setup-venv.bat
+!/packaging/templates/searxng/start-searxng.sh
+!/packaging/templates/searxng/start-searxng.bat

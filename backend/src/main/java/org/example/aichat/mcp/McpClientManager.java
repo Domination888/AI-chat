@@ -7,11 +7,17 @@ import dev.langchain4j.mcp.client.McpClient;
 import dev.langchain4j.mcp.client.transport.McpTransport;
 import dev.langchain4j.mcp.client.transport.http.HttpMcpTransport;
 import dev.langchain4j.mcp.client.transport.stdio.StdioMcpTransport;
+import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.example.aichat.search.SearchRequest;
+import org.example.aichat.search.SearchResponse;
+import org.example.aichat.search.WebSearchGateway;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -32,6 +38,8 @@ public class McpClientManager {
 
     private final McpServerStore store;
     private final AppPaths appPaths;
+    private final WebSearchGateway webSearchGateway;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     /** serverId -> 已连接的 McpClient */
     private final Map<String, McpClient> clients = new ConcurrentHashMap<>();
@@ -42,9 +50,10 @@ public class McpClientManager {
     /** 聚合后的全部工具规格 */
     private volatile List<ToolSpecification> allToolSpecs = new ArrayList<>();
 
-    public McpClientManager(McpServerStore store, AppPaths appPaths) {
+    public McpClientManager(McpServerStore store, AppPaths appPaths, WebSearchGateway webSearchGateway) {
         this.store = store;
         this.appPaths = appPaths;
+        this.webSearchGateway = webSearchGateway;
     }
 
     @Data
@@ -84,6 +93,10 @@ public class McpClientManager {
                 for (ToolSpecification spec : tools) {
                     String toolName = spec.name();
                     status.getToolNames().add(toolName);
+                    if ("webSearch".equals(toolName)) {
+                        log.info("忽略 MCP 服务器 {} 的 webSearch；统一使用后端 Search-RAG", cfg.getId());
+                        continue;
+                    }
                     if (toolToServer.containsKey(toolName)) {
                         log.warn("工具名冲突: '{}' 已由 {} 提供，忽略 {} 的同名工具",
                                 toolName, toolToServer.get(toolName), cfg.getId());
@@ -99,6 +112,7 @@ public class McpClientManager {
                 log.warn("MCP 服务器 [{}] 启动失败（降级跳过）: {}", cfg.getId(), e.getMessage());
             }
         }
+        aggregated.add(localWebSearchSpecification());
         this.allToolSpecs = aggregated;
         log.info("MCP 注册中心就绪：{} 个已连接服务器，{} 个工具", clients.size(), aggregated.size());
     }
@@ -183,12 +197,15 @@ public class McpClientManager {
 
     /** 是否存在指定名称的工具。 */
     public boolean hasTool(String toolName) {
-        return toolToServer.containsKey(toolName);
+        return "webSearch".equals(toolName) || toolToServer.containsKey(toolName);
     }
 
     /** 执行一次 tool-call，按工具名路由到对应服务器；失败返回错误文本（不抛出，便于喂回模型）。 */
     public String executeTool(ToolExecutionRequest request) {
         String toolName = request.name();
+        if ("webSearch".equals(toolName)) {
+            return executeLocalWebSearch(request.arguments());
+        }
         String serverId = toolToServer.get(toolName);
         if (serverId == null) {
             return "工具不存在或未连接: " + toolName;
@@ -210,31 +227,50 @@ public class McpClientManager {
      * 用于"联网开关打开时强制搜一次并注入上下文"的场景。
      */
     public String webSearch(String query) {
-        String toolName = resolveSearchToolName();
-        if (toolName == null) {
-            log.warn("没有可用的联网搜索工具（SearXNG MCP 未连接？）");
-            return null;
-        }
-        String escaped = query.replace("\\", "\\\\").replace("\"", "\\\"");
-        String json = "{\"query\":\"" + escaped + "\",\"language\":\"zh-CN\"}";
-        ToolExecutionRequest req = ToolExecutionRequest.builder()
-                .name(toolName)
-                .arguments(json)
-                .build();
-        String result = executeTool(req);
-        if (result != null && result.startsWith("工具")) {
-            // executeTool 的错误前缀，视为失败
-            return null;
-        }
-        return result;
+        SearchResponse response = webSearchGateway.search(SearchRequest.builder().query(query).maxSources(3).build());
+        return response == null ? null : response.getContextText();
     }
 
     private String resolveSearchToolName() {
-        if (toolToServer.containsKey("webSearch")) return "webSearch";
+        if (webSearchGateway != null) return "webSearch";
         return toolToServer.keySet().stream()
                 .filter(n -> n.toLowerCase().contains("search"))
                 .findFirst()
                 .orElse(null);
+    }
+
+    private ToolSpecification localWebSearchSpecification() {
+        JsonObjectSchema parameters = JsonObjectSchema.builder()
+                .addStringProperty("query", "需要检索的简短查询")
+                .addStringProperty("language", "可选，如 zh-CN 或 en-US")
+                .addStringProperty("time_range", "可选：day、week、month、year")
+                .required("query")
+                .additionalProperties(false)
+                .build();
+        return ToolSpecification.builder()
+                .name("webSearch")
+                .description("通过本地 SearXNG 召回、读取公开网页原文并进行本地语义重排；返回带编号和 URL 的可靠来源")
+                .parameters(parameters)
+                .build();
+    }
+
+    private String executeLocalWebSearch(String arguments) {
+        try {
+            JsonNode json = objectMapper.readTree(arguments == null ? "{}" : arguments);
+            String query = json.path("query").asText("").strip();
+            if (query.isBlank()) query = json.path("search_query").asText("").strip();
+            if (query.isBlank()) return "联网检索失败：query 不能为空";
+            SearchResponse response = webSearchGateway.search(SearchRequest.builder()
+                    .query(query)
+                    .language(json.path("language").asText(null))
+                    .timeRange(json.path("time_range").asText(null))
+                    .maxSources(3)
+                    .build());
+            return response.getContextText();
+        } catch (Exception e) {
+            log.warn("本地 webSearch 工具执行失败: {}", e.getMessage());
+            return "联网检索失败：" + e.getMessage();
+        }
     }
 
     public List<ServerStatus> statuses() {

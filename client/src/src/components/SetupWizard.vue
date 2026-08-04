@@ -16,6 +16,10 @@
           <input v-model="form.llmModelName" type="text" class="w-full px-3 py-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" placeholder="gemma4-e4b" />
         </div>
         <div>
+          <label class="block text-sm font-medium mb-1 dark:text-gray-300">LLM API Key（可选）</label>
+          <input v-model="form.llmApiKey" type="password" autocomplete="off" class="w-full px-3 py-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" placeholder="本地模型可留空" />
+        </div>
+        <div>
           <label class="block text-sm font-medium mb-1 dark:text-gray-300">Embedding API Base URL</label>
           <input v-model="form.embeddingBaseUrl" type="text" class="w-full px-3 py-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" placeholder="http://127.0.0.1:1234/v1" />
         </div>
@@ -56,11 +60,12 @@ const saving = ref(false)
 const error = ref('')
 
 const form = reactive({
-  llmBaseUrl: props.initialSettings.modelBaseUrl || 'http://127.0.0.1:1234/v1',
-  llmModelName: props.initialSettings.modelName || 'gemma4-e4b',
-  embeddingBaseUrl: props.initialSettings.embeddingBaseUrl || 'http://127.0.0.1:1234/v1',
-  embeddingModelName: props.initialSettings.embeddingModelName || 'text-embedding-qwen3-embedding-4b',
-  ttsBaseUrl: props.initialSettings.astraTtsBaseUrl || 'http://localhost:5000',
+  llmBaseUrl: props.initialSettings.modelBaseUrl || '',
+  llmModelName: props.initialSettings.modelName || '',
+  llmApiKey: props.initialSettings.llmApiKey || '',
+  embeddingBaseUrl: props.initialSettings.embeddingBaseUrl || '',
+  embeddingModelName: props.initialSettings.embeddingModelName || '',
+  ttsBaseUrl: props.initialSettings.astraTtsBaseUrl || '',
 })
 
 async function save() {
@@ -71,6 +76,7 @@ async function save() {
       ...props.initialSettings,
       modelBaseUrl: form.llmBaseUrl.trim(),
       modelName: form.llmModelName.trim(),
+      llmApiKey: form.llmApiKey.trim(),
       llmStreamingModelName: form.llmModelName.trim(),
       embeddingBaseUrl: form.embeddingBaseUrl.trim(),
       embeddingModelName: form.embeddingModelName.trim(),

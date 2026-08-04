@@ -16,7 +16,7 @@ const {
 const {
   allocateAllPorts,
   getActivePorts,
-  patchMcpSearxngUrl,
+  patchSearchRuntimeUrl,
   portEnvExtras,
 } = require('./port-manager');
 
@@ -390,6 +390,79 @@ async function startQdrant() {
   await waitForUrl(`http://127.0.0.1:${p.qdrant}/healthz`, 'Qdrant', 30);
 }
 
+function firstConfigured(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+function readMemosModelEnv() {
+  const configPath = path.join(seedUserConfig(), 'runtime-config.json');
+  let config = {};
+  try {
+    if (exists(configPath)) config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  } catch (err) {
+    console.warn('[service-manager] runtime model config unreadable, using MemOS defaults:', err.message);
+  }
+
+  const llm = config.llm || {};
+  const embedding = config.embedding || {};
+  const memos = config.memos || {};
+
+  const utilityInherits = llm.utilityInheritConnection !== false;
+  const utilityBaseUrl = utilityInherits
+    ? firstConfigured(llm.baseUrl)
+    : firstConfigured(llm.utilityBaseUrl, llm.baseUrl);
+  const utilityApiKey = utilityInherits
+    ? firstConfigured(llm.apiKey)
+    : firstConfigured(llm.utilityApiKey);
+  const utilityModel = firstConfigured(llm.utilityModelName, llm.modelName, llm.streamingModelName);
+
+  const memoryInherits = memos.modelInheritConnection !== false;
+  const memoryBaseUrl = memoryInherits
+    ? utilityBaseUrl
+    : firstConfigured(memos.modelBaseUrl, utilityBaseUrl);
+  const memoryApiKey = memoryInherits
+    ? utilityApiKey
+    : firstConfigured(memos.modelApiKey);
+  const memoryModel = firstConfigured(memos.modelName, utilityModel);
+
+  const memoryEmbeddingInherits = memos.embeddingInheritConnection !== false;
+  const embeddingBaseUrl = memoryEmbeddingInherits
+    ? firstConfigured(embedding.baseUrl)
+    : firstConfigured(memos.embeddingBaseUrl, embedding.baseUrl);
+  const embeddingApiKey = memoryEmbeddingInherits
+    ? firstConfigured(embedding.apiKey)
+    : firstConfigured(memos.embeddingApiKey);
+  const embeddingModel = firstConfigured(memos.embeddingModelName, embedding.modelName);
+  const dimension = Number(memos.embeddingDimension);
+
+  const env = {
+    MOS_CHAT_MODEL_PROVIDER: 'openai',
+    MOS_CHAT_MODEL: memoryModel,
+    OPENAI_API_BASE: memoryBaseUrl,
+    OPENAI_API_KEY: memoryApiKey || 'local',
+    MEMRADER_MODEL: memoryModel,
+    MEMRADER_API_BASE: memoryBaseUrl,
+    MEMRADER_API_KEY: memoryApiKey || 'EMPTY',
+    MEMREADER_GENERAL_BACKEND: 'openai',
+    MEMREADER_GENERAL_MODEL: memoryModel,
+    MEMREADER_GENERAL_API_BASE: memoryBaseUrl,
+    MEMREADER_GENERAL_API_KEY: memoryApiKey || 'EMPTY',
+    MOS_EMBEDDER_BACKEND: 'universal_api',
+    MOS_EMBEDDER_PROVIDER: 'openai',
+    MOS_EMBEDDER_MODEL: embeddingModel,
+    MOS_EMBEDDER_API_BASE: embeddingBaseUrl,
+    MOS_EMBEDDER_API_KEY: embeddingApiKey || 'EMPTY',
+    EMBEDDING_DIMENSION: Number.isInteger(dimension) && dimension > 0 ? String(dimension) : '1024',
+    MOS_RERANKER_BACKEND: 'cosine_local',
+  };
+
+  // Node 的 spawn env 不能包含 undefined；缺失项留给 MemOS 自己的默认值。
+  return Object.fromEntries(Object.entries(env).filter(([, value]) => value !== ''));
+}
+
 async function startMemos() {
   const p = ports();
   const memosDir = runtimeBin('memos');
@@ -405,7 +478,7 @@ async function startMemos() {
   const cmd = process.platform === 'win32' ? startScript : '/bin/bash';
   const args = process.platform === 'win32' ? [] : [startScript];
   spawnManaged('memos', cmd, args, {
-    env: baseEnv(),
+    env: baseEnv(readMemosModelEnv()),
     cwd: memosDir,
     shell: process.platform === 'win32',
   });
@@ -506,7 +579,7 @@ async function startAll(onProgress) {
     ensureDir(getLogsDir());
     seedUserConfig();
     await allocateAllPorts();
-    patchMcpSearxngUrl();
+    if (isPackaged()) patchSearchRuntimeUrl();
     appendLog('service-manager', `\n[ports] ${JSON.stringify(ports())}\n`);
 
     const steps = [

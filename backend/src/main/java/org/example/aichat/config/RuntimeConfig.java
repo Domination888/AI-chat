@@ -15,12 +15,22 @@ public class RuntimeConfig {
     private EmbeddingSection embedding = new EmbeddingSection();
     private VoiceSection voice = new VoiceSection();
     private MemosSection memos = new MemosSection();
+    private SearchSection search = new SearchSection();
     private ClientSection client = new ClientSection();
 
     @Data
     public static class LlmSection {
         private String baseUrl;
         private String modelName;
+        private String apiKey;
+        private String thinkingMode;
+        private String reasoningEffort;
+        private Boolean utilityInheritConnection;
+        private String utilityBaseUrl;
+        private String utilityApiKey;
+        private String utilityModelName;
+        private String utilityThinkingMode;
+        private String utilityReasoningEffort;
         private String streamingModelName;
         private Long connectTimeoutMs;
         private Long readTimeoutMs;
@@ -31,6 +41,7 @@ public class RuntimeConfig {
     public static class EmbeddingSection {
         private String baseUrl;
         private String modelName;
+        private String apiKey;
     }
 
     @Data
@@ -60,6 +71,31 @@ public class RuntimeConfig {
         private Boolean includeSkillMemory;
         private Boolean saveAssistantTurns;
         private Boolean fallbackToRag;
+        private Boolean modelInheritConnection;
+        private String modelBaseUrl;
+        private String modelApiKey;
+        private String modelName;
+        private Boolean embeddingInheritConnection;
+        private String embeddingBaseUrl;
+        private String embeddingApiKey;
+        private String embeddingModelName;
+        private Integer embeddingDimension;
+    }
+
+    @Data
+    public static class SearchSection {
+        private String searxngUrl;
+        private Boolean queryPlannerEnabled;
+        private Integer plannerTimeoutMs;
+        private Integer maxQueries;
+        private Integer resultsPerQuery;
+        private Integer fetchPages;
+        private Integer maxSources;
+        private Integer pageTimeoutMs;
+        private Integer totalTimeoutMs;
+        private Integer resultCacheMinutes;
+        private Integer pageCacheHours;
+        private String engines;
     }
 
     @Data
@@ -71,6 +107,13 @@ public class RuntimeConfig {
         private Boolean proactiveChatEnabled;
         private Integer proactiveIdleSeconds;
         private String proactivePrompt;
+        private Boolean autoResearchEnabled;
+        private Integer researchIntervalMinutes;
+        private Integer researchDeliveryIdleSeconds;
+        private Integer researchCooldownMinutes;
+        private String researchQuietStart;
+        private String researchQuietEnd;
+        private Integer researchScoreThreshold;
         private List<RecentLlmModel> recentLlmModels;
     }
 

@@ -1,6 +1,6 @@
 <template>
-  <div v-if="show" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg w-full max-w-5xl mx-4 flex flex-col max-h-[88vh]">
+  <div v-if="show" :class="embedded ? 'w-full h-[58vh] min-h-[420px]' : 'fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50'">
+    <div :class="embedded ? 'w-full h-full flex flex-col border dark:border-gray-700 rounded-lg overflow-hidden' : 'bg-white dark:bg-gray-800 rounded-xl shadow-lg w-full max-w-5xl mx-4 flex flex-col max-h-[88vh]'">
       <div class="flex items-center justify-between p-4 border-b dark:border-gray-700 shrink-0">
         <div>
           <h3 class="text-lg font-semibold dark:text-gray-100">系统日志</h3>
@@ -9,7 +9,7 @@
           </p>
           <p v-if="logsRoot" class="text-xs text-gray-400 truncate max-w-md" :title="logsRoot">{{ logsRoot }}</p>
         </div>
-        <button @click="$emit('close')" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+        <button v-if="!embedded" @click="$emit('close')" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
           </svg>
@@ -78,6 +78,7 @@ import { ElMessage } from 'element-plus'
 
 const props = defineProps({
   show: { type: Boolean, default: false },
+  embedded: { type: Boolean, default: false },
 })
 
 defineEmits(['close'])

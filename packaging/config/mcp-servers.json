@@ -1,0 +1,15 @@
+[
+  {
+    "id": "prime",
+    "name": "Prime 示例工具",
+    "description": "示例本地 MCP 工具：isPrime 判断质数",
+    "enabled": true,
+    "builtin": true,
+    "transport": "stdio",
+    "command": [
+      "java",
+      "-jar",
+      "mcp/prime-mcp-server-1.0.0.jar"
+    ]
+  }
+]
