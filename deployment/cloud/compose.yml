@@ -1,0 +1,69 @@
+name: story-space
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: deployment/cloud/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      STORY_DATABASE_URL: jdbc:postgresql://postgres:5432/stories
+      STORY_DATABASE_USER: stories
+      STORY_BYOK_PROXY_HOST: egress
+      STORY_S3_ENDPOINT: http://objects:9000
+      STORY_S3_BUCKET: stories
+    volumes: ["app-data:/data"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      objects-init: {condition: service_completed_successfully}
+      egress: {condition: service_started}
+    ports: ["127.0.0.1:8081:8081"]
+  postgres:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: stories
+      POSTGRES_DB: stories
+      POSTGRES_PASSWORD: ${STORY_DATABASE_PASSWORD:?Set STORY_DATABASE_PASSWORD}
+    volumes: ["database:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U stories -d stories"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  objects:
+    build:
+      context: ../..
+      dockerfile: deployment/cloud/minio.Dockerfile
+    restart: unless-stopped
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: ${STORY_S3_ACCESS_KEY:?Set STORY_S3_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${STORY_S3_SECRET_KEY:?Set STORY_S3_SECRET_KEY}
+    volumes: ["objects:/data"]
+  objects-init:
+    build:
+      context: ../..
+      dockerfile: deployment/cloud/object-init.Dockerfile
+    environment:
+      ACCESS: ${STORY_S3_ACCESS_KEY:?}
+      SECRET: ${STORY_S3_SECRET_KEY:?}
+    depends_on: [objects]
+  egress:
+    build:
+      context: ../..
+      dockerfile: deployment/cloud/egress.Dockerfile
+    restart: unless-stopped
+  https:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80","443:443"]
+    environment:
+      STORY_DOMAIN: ${STORY_DOMAIN:?Set the public domain}
+    volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro","tls:/data"]
+    depends_on: [api]
+volumes:
+  database:
+  objects:
+  app-data:
+  tls:

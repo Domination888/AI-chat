@@ -1,0 +1,18 @@
+Story Space / 幕间
+Copyright 2026 Story Space contributors.
+Original application source and SVG scene artwork in the exported local edition are licensed under Apache-2.0.
+
+Third-party software and model files are separate works and retain their own licenses:
+- Vue: MIT; Electron: MIT with Chromium notices shipped by Electron.
+- Spring Boot, Spring Security: Apache-2.0; SQLite: public domain; sqlite-jdbc: Apache-2.0.
+- PostgreSQL and pgvector: PostgreSQL license; used only by the hosted edition.
+- Eclipse Temurin/OpenJDK: GPL-2.0 with Classpath Exception; include the bundled legal directory.
+- llama.cpp and GGML: MIT; source https://github.com/ggml-org/llama.cpp and https://github.com/ggml-org/ggml.
+- sherpa-onnx: Apache-2.0; https://github.com/k2-fsa/sherpa-onnx.
+- SoundFile/libsndfile, FFmpeg and espeak-ng carry their upstream notices and may have LGPL/GPL obligations. Ship the exact binaries' license files and corresponding-source information before public redistribution.
+- Qwen3-4B and Qwen3-Embedding-0.6B: Apache-2.0, from Qwen official model repositories.
+- Kokoro-82M-v1.1-zh: Apache-2.0, from hexgrad; preserve model and converted-artifact notices.
+- SenseVoiceSmall weights: FunASR model license, not the application Apache license; retain model name and attribution and review the exact conversion's notices.
+
+The local source archive does not contain the hosted account/admin implementation, personal configuration, proprietary Live2D Cubism Core, existing character/voice assets, model weights, or private signing keys.
+Model packs have their own signed manifest containing model source, license, file size and SHA-256. Do not remove those notices when redistributing them.

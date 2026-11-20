@@ -1,59 +1,55 @@
-# 脚本说明
+# 工具入口
 
-本项目脚本按使用频率分三层：日常开发只使用一键启动和停止；构建打包走 `scripts/package-all.sh`；语料和打包模板脚本只在维护对应流水线时使用。
+## 日常开发与打包
 
-## 日常入口
+以下命令均在仓库根目录执行。版本只有商业版与离线版；商业版用户端和管理端共用后端。
 
-| 脚本 | 用途 | 备注 |
-| --- | --- | --- |
-| `startup-scripts/start-all.sh` | 启动完整开发环境 | 默认入口。拉起 SearXNG、后端、前端、Electron、ASR，并检查远端 Astra TTS。 |
-| `startup-scripts/stop-all.sh` | 停止完整开发环境 | 根据 `unified-logs/pids/pids.txt` 和端口兜底清理本机进程。 |
-| `scripts/local-db.sh` | 访问本机 MySQL / Redis | 读取 `config/local-services.env`，避免依赖 PATH。 |
-
-不再保留按模块启动脚本。开发期一般需要后端、前端、Electron、ASR 和搜索能力同时在线，分散入口容易造成状态不一致；临时调试单个模块时，直接进入对应目录运行原生命令即可。
-
-## 构建与打包
-
-| 脚本 | 用途 | 备注 |
-| --- | --- | --- |
-| `scripts/setup-dev.sh` | 安装开发依赖 | Maven、Electron、前端和 ASR Python 依赖的一次性初始化。 |
-| `scripts/build-all.sh` | 构建可打包产物 | 构建 Prime MCP JAR、后端 JAR 和前端 dist；联网搜索已内置在后端。 |
-| `scripts/package-all.sh` | 一键打包桌面应用 | 调用构建、准备 ASR 模型、组装 runtime staging，然后运行 electron-builder。 |
-| `scripts/download-asr-models.sh` | 下载 SenseVoice 模型 | 写入 `packaging/cache/asr-models/`，通常由 `package-all.sh` 自动触发。 |
-
-## 人设语料流水线
-
-这些脚本用于维护黍的人设与 RAG 语料，不属于日常启动路径。
-
-| 脚本 | 用途 | 输出 |
-| --- | --- | --- |
-| `scripts/fetch_prts.py` | 从 PRTS 拉取干员页面并清洗人格相关章节 | `data/raw/shu/*.md` |
-| `scripts/fetch_huai_shu_li_stories.py` | 抓取“怀黍离”活动剧情 wikitext 并转 Markdown | `data/raw/shu/stories/huai-shu-li/*.md` |
-| `scripts/slice_shu_stories.py` | 把活动剧情切成黍出场场景片段 | `backend/src/main/resources/personas/shu/lore/stories/*.md` |
-| `scripts/distill_shu_persona.py` | 调用 OpenAI 兼容 LLM 做人设 map-reduce 蒸馏 | `data/processed/shu/persona_distillation/` |
-| `scripts/verify_persona_pipeline.py` | 预览 persona、memory、RAG 拼接效果 | `docs/prompt_preview_shu.md` |
-
-## `packaging/` 内容
-
-`packaging/` 是全依赖安装包的运行时组装区，里面既有源码级脚本，也有本地生成的缓存。大文件和生成目录不作为普通源码维护。
-
-| 路径 | 内容 |
+| 命令 | 实际作用 |
 | --- | --- |
-| `packaging/stage-runtime.sh` | 把后端 JAR、MCP JAR、JRE、MySQL、Redis、ASR、MemOS、SearXNG 等组装到 `packaging/staging/<platform>/`。 |
-| `packaging/fetch-runtime.sh` | 说明和辅助准备便携 runtime 缓存；目前主要提示应放入 `packaging/cache/<platform>/` 的目录结构。 |
-| `packaging/populate-cache-mac.sh` | 从本机安装或网络下载填充 macOS 打包缓存。 |
-| `packaging/init-mysql.sh` | 打包版便携 MySQL 首次初始化辅助脚本。 |
-| `packaging/scripts/create-jre.sh` | 使用 `jlink` 生成裁剪版 JRE。 |
-| `packaging/config/` | 打包随附配置：初始化 SQL、乱码修复 SQL、运行时配置默认值、MCP 服务器注册表。 |
-| `packaging/templates/asr/` | 打包版 SenseVoice ASR 服务、启动脚本、bundle 构建脚本。 |
-| `packaging/templates/memos/` | 打包版 MemOS 启动脚本和 venv 构建脚本。 |
-| `packaging/templates/searxng/` | 打包版 SearXNG 启动脚本、venv 构建脚本和 settings。 |
-| `packaging/cache/` | 本机打包缓存，存放下载或复制来的 runtime、模型、venv 等生成物。 |
-| `packaging/staging/` | electron-builder 的 `extraResources` 临时组装目录，由 `stage-runtime.sh` 重建。 |
+| `npm run setup` | 安装/更新桌面唯一依赖树，解析服务端依赖 |
+| `npm run dev` / `npm run dev:offline` | 自动构建最新离线前后端并启动桌面；无需预先 staging JRE |
+| `npm run dev:commercial` | 启动专用开发 Docker 基础服务、商业后端、用户端；输出管理端与开发邮箱地址 |
+| `npm run dev:admin` | 同一商业开发环境，以管理端网页为入口 |
+| `npm run dev:otp` | 读取本地开发管理员 TOTP 密钥，输出当前动态验证码 |
+| `npm run dev:offline -- --smoke` | 自动验证离线前后端与认证角色 API，完成后停止 |
+| `npm run dev:commercial -- --smoke` | 自动验证商业前后端、MFA 与管理 API，完成后停止 |
+| `npm run package:commercial:user` | 自动构建并打包商业版用户端 |
+| `npm run package:commercial:admin` | 自动构建管理端网页、商业 JAR、独立 Docker 部署包 |
+| `npm run package:offline` | 自动构建前后端、组装/刷新原生运行时，整体打包离线版 |
+| `npm run build` | 前端检查、三种界面、商业 JAR、离线 JAR 的全量构建 |
+| `npm test` | 前端协议/模型包与离线 Java 回归 |
+| `npm run test:workflow` | 开发工作流辅助逻辑回归 |
 
-## 清理原则
+`dev:cloud` / `package:cloud` 保留为商业版兼容别名。`scripts/workspace.cjs` 是完整启动与打包的统一编排入口。商业版开发需 Docker 已启动，离线原生打包的工具前提见 [packaging](packaging.md)。Ctrl+C 停止本次启动内容并保留专用开发数据；`.local/dev/` 和开发 Docker volumes 不与安装版/生产数据混用。
 
-- 保留一键入口：开发只认 `start-all.sh` / `stop-all.sh`。
-- 保留能被构建、打包、Electron 或后端资源链路使用的脚本。
-- 删除解释器缓存、重复模块启动入口和无法解释调用场景的脚本。
-- `packaging/cache/`、`packaging/staging/`、模板里的 `venv/` 属于生成物；需要时重建，不在脚本梳理时当成源码入口。
+## 发行工具
+
+- `scripts/package-all.sh offline|commercial|admin [mac|win]`、`scripts/release/build.sh`：兼容入口，转发到完整流程。
+- `prepare-runtime.py <平台>`：校验离线 JAR、刷新现有 staging；缺少 staging 时使用本机原生工具自动组装。
+- `stage-runtime.py <平台> --java ... --llama ... --voice ... --ffmpeg ...`：指定路径组装离线运行时，拒绝商业 JAR；macOS 处理动态库路径。
+- `stage-ci.py`：CI 的原生运行时组装入口。
+- `fetch-models.py`：发行方下载模型并记录来源；客户端不执行此下载器。
+- `sign-model-pack.py`：生成模型清单、SHA-256 与 Ed25519 签名。
+- `export-source.py`：白名单导出 Apache-2.0 离线源码，剔除商业类、个人配置、私有素材与权重。
+- `verify-artifacts.cjs`：检查桌面包体和源码边界，生成产物校验清单。
+- `init-cloud.py`：写入权限 600 的私有生产部署 `.env`，不输出凭据。
+- `.github/workflows/release-candidates.yml`：手动构建 macOS/Windows 候选，不自动发布。
+
+管理端部署包自带 `SHA256SUMS` 和 [部署说明](commercial-admin-deploy.md)。它与商业版用户端连接同一商业服务；不是另一套用户数据库。
+
+## 数据与验收
+
+- `export-legacy.py <输出.json> --user-id <ID...>`：MySQL 只读事务导出；`--all-roles` 保留个人库中未使用角色，`--memories` 附带记忆审阅副本。
+- `merge-exports.py <输出.json> <输入...>`：合并可移植导出，重映射角色、消息、回合、世界、附件标识并保留引用。
+- `native-smoke.cjs`：隔离目录中调用真实本地模型、ASR/TTS；默认 30 轮，`STORY_EVAL_TURNS` 可调整。
+- `scripts/tests/`：合并工具与开发辅助逻辑回归。
+
+角色语料工具使用 `data/` 与 `.local/personal/personas/`。体验记录、截图和审计快照保存在本机。
+
+## 黍完整流程验收
+
+- `scripts/release/stage-shu.py`：复制已有私人黍素材、角色卡/lore、技能与安全 builtin 工具示例，供显式个人构建使用。
+- `scripts/release/verify-shu-flow.cjs`：实际 SQLite/PostgreSQL、角色导入、旧技能/MCP、模型工具调用、语义兴趣、聊天、ASR、Astra WAV、日历、记忆纠正、日报主动 SSE 与反馈。只写 `.local/dev/verification/flow-*` 和专用测试 PostgreSQL；需要该目录已有私有 services.json（测试模型地址/令牌）、story-offline.jar、story-cloud.jar 和名为 story-space-migration-test-pg 的专用容器。ASR/Astra/SearxNG 使用显式环境地址或文中默认值。
+- 真实流程报告记录核心通过与完整能力通过两个字段；外部搜索无来源不会冒充全功能通过。`--serve` 保留本次后端供桌面验收，结束后 SIGINT 关闭本次子进程。不会自动连接或修改安装版数据。
+
+`verify-shu-flow.cjs --voice-only` 单独验证两版后端的真实 Astra 极短句与合并句，适用于语音修复回归，不依赖当天日报已发布。

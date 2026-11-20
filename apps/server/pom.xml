@@ -1,0 +1,27 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-parent</artifactId><version>3.5.11</version><relativePath/></parent>
+  <groupId>org.example.aichat</groupId><artifactId>story-runtime</artifactId><version>0.1.0</version>
+  <properties><java.version>17</java.version></properties>
+  <dependencies>
+    <dependency><groupId>dev.langchain4j</groupId><artifactId>langchain4j-mcp</artifactId><version>1.10.0-beta18</version></dependency>
+    <dependency><groupId>cn.6tail</groupId><artifactId>lunar</artifactId><version>1.7.4</version></dependency>
+    <dependency><groupId>org.jsoup</groupId><artifactId>jsoup</artifactId><version>1.18.3</version></dependency>
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency>
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-jdbc</artifactId></dependency>
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-security</artifactId></dependency>
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-mail</artifactId></dependency>
+    <dependency><groupId>org.xerial</groupId><artifactId>sqlite-jdbc</artifactId><version>3.49.1.0</version></dependency>
+    <dependency><groupId>org.postgresql</groupId><artifactId>postgresql</artifactId><scope>runtime</scope></dependency>
+    <dependency><groupId>org.projectlombok</groupId><artifactId>lombok</artifactId><optional>true</optional></dependency>
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
+  </dependencies>
+  <build><plugins>
+    <plugin><groupId>org.codehaus.mojo</groupId><artifactId>build-helper-maven-plugin</artifactId><version>3.6.1</version><executions><execution><id>shared-rp</id><phase>generate-sources</phase><goals><goal>add-source</goal></goals><configuration><sources><source>${project.basedir}/../../packages/rp/src/main/java</source></sources></configuration></execution></executions></plugin>
+    <plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId><configuration><mainClass>org.example.aichat.release.ReleaseApplication</mainClass></configuration></plugin>
+  </plugins></build>
+  <profiles><profile><id>offline</id><build><resources><resource><directory>src/main/resources</directory><excludes><exclude>application-cloud.yml</exclude><exclude>db/V1__postgres.sql</exclude><exclude>static/admin/**</exclude></excludes></resource></resources><plugins>
+    <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><configuration><excludes><exclude>**/cloud/**</exclude></excludes><testExcludes><testExclude>**/cloud/**</testExclude></testExcludes></configuration></plugin>
+    <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-jar-plugin</artifactId><configuration><excludes><exclude>**/cloud/**</exclude><exclude>static/admin/**</exclude></excludes></configuration></plugin>
+  </plugins></build></profile></profiles>
+</project>

@@ -1,0 +1,34 @@
+server:
+  forward-headers-strategy: native
+  address: ${STORY_BIND:0.0.0.0}
+story:
+  mode: cloud
+  byok-proxy-host: ${STORY_BYOK_PROXY_HOST:}
+  byok-proxy-port: ${STORY_BYOK_PROXY_PORT:3128}
+  s3-endpoint: ${STORY_S3_ENDPOINT:}
+  s3-bucket: ${STORY_S3_BUCKET:stories}
+  s3-access-key: ${STORY_S3_ACCESS_KEY:}
+  s3-secret-key: ${STORY_S3_SECRET_KEY:}
+  s3-region: ${STORY_S3_REGION:us-east-1}
+  mail-from: ${STORY_MAIL_FROM:}
+  encryption-key: ${STORY_ENCRYPTION_KEY:}
+  admin-email: ${STORY_ADMIN_EMAIL:}
+  admin-password: ${STORY_ADMIN_PASSWORD:}
+  admin-totp-secret: ${STORY_ADMIN_TOTP_SECRET:}
+spring:
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: ${STORY_DATABASE_URL:jdbc:postgresql://127.0.0.1:5432/stories}
+    username: ${STORY_DATABASE_USER:stories}
+    password: ${STORY_DATABASE_PASSWORD:}
+  mail:
+    host: ${STORY_SMTP_HOST:}
+    port: ${STORY_SMTP_PORT:587}
+    username: ${STORY_SMTP_USER:}
+    password: ${STORY_SMTP_PASSWORD:}
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+      mail.smtp.connectiontimeout: 5000
+      mail.smtp.timeout: 5000
+      mail.smtp.writetimeout: 5000

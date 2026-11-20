@@ -1,0 +1,39 @@
+server:
+  address: ${STORY_BIND:127.0.0.1}
+  port: ${STORY_PORT:8081}
+  error:
+    include-message: never
+spring:
+  profiles:
+    default: offline
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 25MB
+  mvc:
+    async:
+      request-timeout: 180000
+story:
+  data-dir: ${STORY_DATA:./story-data}
+  signing-key: ${STORY_SIGNING_KEY:}
+  local-token: ${STORY_LOCAL_TOKEN:}
+  llm-url: ${STORY_LLM_URL:http://127.0.0.1:12345/v1}
+  llm-key: ${STORY_LLM_KEY:}
+  llm-vision: ${STORY_LLM_VISION:false}
+  llm-model: ${STORY_LLM_MODEL:Qwen3-4B}
+  embedding-url: ${STORY_EMBEDDING_URL:http://127.0.0.1:12346/v1}
+  embedding-model: ${STORY_EMBEDDING_MODEL:Qwen3-Embedding-0.6B}
+  embedding-key: ${STORY_EMBEDDING_KEY:}
+  voice-key: ${STORY_VOICE_KEY:}
+  asr-model: ${STORY_ASR_MODEL:SenseVoiceSmall}
+  tts-engine: ${STORY_TTS_ENGINE:astra}
+  astra-url: ${STORY_ASTRA_URL:http://127.0.0.1:5001}
+  search-url: ${STORY_SEARCH_URL:http://127.0.0.1:8888}
+  tts-model: ${STORY_TTS_MODEL:Kokoro}
+  tts-voice: ${STORY_TTS_VOICE:default}
+  asr-url: ${STORY_ASR_URL:http://127.0.0.1:12347/v1/audio/transcriptions}
+  tts-url: ${STORY_TTS_URL:http://127.0.0.1:12347/v1/audio/speech}
+  daily-platform-limit: ${STORY_DAILY_LIMIT:100}
+  daily-custom-limit: ${STORY_DAILY_CUSTOM_LIMIT:1000}
+  max-streams: ${STORY_MAX_STREAMS:20}
+  allowed-origins: ${STORY_ORIGINS:app://story,http://localhost:3000}

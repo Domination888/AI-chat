@@ -1,0 +1,144 @@
+/* Shared controls and surfaces: release components inherit the same palette. */
+.release-shell {
+  --paper:var(--r-bg); --surface:var(--r-paper); --surface-soft:#edf1e8;
+  --ink:var(--r-ink); --muted:var(--r-muted); --line:var(--r-line);
+  --accent:#53745e; --accent-dark:#355741; --accent-soft:#e5eddf;
+  font-size:14px;
+}
+.release-shell .release-primary {border-color:var(--r-ink);font-weight:600}
+.release-shell .release-primary:hover:not(:disabled) {background:#3b5747;border-color:#3b5747}
+.release-shell .release-danger {color:#a34033!important;border-color:#e5c8c1;background:#fff8f5}
+.release-shell .release-danger:hover:not(:disabled) {background:#f9e8e2;border-color:#c48b7e}
+.release-shell .is-selected {background:#e3ecdd;border-color:#a7baa0;color:#2d5139}
+.release-shell select {min-height:36px;padding:7px 10px;border:1px solid var(--r-line);border-radius:8px;background:var(--r-paper);color:var(--r-ink);max-width:100%}
+.release-shell input[type=checkbox] {width:16px;height:16px;flex-shrink:0;accent-color:#42634c}
+.release-shell button:disabled {opacity:.45;cursor:not-allowed}
+.release-nav {width:244px;padding:28px 16px 16px;background:#eef1e9}
+.release-nav .release-brand {margin:0 12px 24px}
+.release-nav-links {display:grid;gap:5px}
+.release-shell .release-nav-item {display:flex;align-items:center;gap:12px;width:100%;border:1px solid transparent;background:transparent;margin:0;min-height:40px;font-size:14px;color:var(--r-muted);text-align:left}
+.release-shell .release-nav-item.active {background:#dfe9d7;color:var(--r-ink)!important;font-weight:600}
+.release-nav-heading {padding:26px 10px 10px;font-size:12px;letter-spacing:0}
+.release-nav-heading button {width:30px;min-height:30px;padding:0;font-size:18px}
+.release-chapters {padding:3px 0;min-height:60px}
+.release-chapters>button {border:1px solid transparent;background:transparent;margin:3px 0;padding:11px 13px;min-height:58px}
+.release-chapters>button.active {background:var(--r-paper)}
+.release-chapters>button>span {display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
+.release-chapters small {margin:4px 0 0;font-size:12px}
+.release-nav-bottom {display:grid;gap:4px;padding-top:12px;margin-top:12px}
+.release-shell .release-account {min-height:46px;margin:8px 0 0;padding:6px 8px;background:transparent;border-color:transparent;gap:10px}
+.release-account div {font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.release-account b {font-size:12px;font-weight:500;white-space:nowrap;color:var(--r-muted)}
+.release-unread {width:7px;height:7px;background:#b96d44;border-radius:50%;margin-left:auto}
+.release-topbar {height:64px;padding:0 30px;background:#fcfbf7}
+.release-topbar>span {flex:1;font-size:12px}
+.release-topbar>button:last-child {margin-left:auto;font-size:12px}
+.release-library {padding:28px 32px}
+.release-story-header {padding:22px 28px 18px;align-items:center;gap:16px;flex-wrap:wrap;flex-shrink:0}
+.release-story-title {min-width:0;flex:1 1 180px}
+.release-story-title h1 {font-size:24px;font-weight:600;line-height:1.4;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.release-story-header>.release-story-actions {display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;max-width:none}
+.release-story-actions>button {white-space:nowrap;min-height:38px;padding:8px 12px}
+.release-story-actions>.release-primary {padding:9px 14px}
+.release-chapter-menu {position:relative}
+.release-chapter-menu>button {list-style:none;display:grid;place-items:center;min-width:38px;min-height:38px;border:1px solid var(--r-line);border-radius:9px;background:var(--r-paper);cursor:pointer}
+.release-chapter-menu>button[aria-expanded="true"] {background:#e3ecdd;border-color:#a7baa0}
+.release-chapter-menu>div {position:absolute;right:0;top:46px;z-index:20;padding:8px;border:1px solid var(--r-line);border-radius:12px;background:var(--r-paper);white-space:nowrap}
+.release-search {padding:0 28px 16px;flex-shrink:0;align-items:center}
+.release-search input {flex:1;min-width:0;max-width:none}
+.release-search button {white-space:nowrap}
+.release-story-workspace {display:flex;gap:20px;flex:1;min-height:0;padding:0 28px;overflow:hidden}
+.release-conversation-pane {display:flex;flex-direction:column;flex:1;min-width:0;min-height:0}
+.release-main .message-viewport {width:100%;margin:0;background:transparent}
+.release-main .message-column {max-width:850px;padding:20px 8px 30px}
+.release-main .message-row {gap:12px;margin-bottom:26px}
+.release-main .message-avatar {width:34px;height:34px;min-height:0;border:1px solid #d6decf;background:#e4ecdd;color:#3e583f;box-shadow:none}
+.release-main .message-name {font-size:12px;margin-bottom:6px;color:var(--r-muted)}
+.release-main .message-bubble {border:1px solid #e1e3d9;background:var(--r-paper);box-shadow:none;padding:15px 18px;border-radius:4px 17px 17px 17px}
+.release-main .is-user .message-bubble {background:#e6eedd;border-color:#d3dfc9;border-radius:17px 4px 17px 17px}
+.release-main .message-text {font-size:14px;line-height:1.85;color:var(--r-ink)}
+.release-main .message-actions,.release-main .message-feedback {gap:6px;margin-top:9px;align-items:center}
+.release-main .message-actions button,.release-main .message-feedback button,.release-main .message-audio {border-color:transparent;background:transparent;border-radius:6px;padding:5px 8px;min-height:30px;color:var(--r-muted);font-size:12px}
+.release-main .message-actions button:hover,.release-main .message-feedback button:hover {text-decoration:none;background:#e4ecdd}
+.release-main .audio-note, .release-main .search-note, .release-main .message-sources, .release-main .message-meta {font-size:12px}
+.release-main .story-welcome {min-height:min(340px,100%);padding:24px 0}
+.release-main .story-welcome h2 {line-height:1.5;font-family:inherit;font-size:18px;font-weight:600;margin:0}
+.release-main .prompt-list {display:flex;justify-content:center;flex-wrap:wrap;width:auto;max-width:100%;margin:16px 0 0}
+.release-main .prompt-list button {min-height:36px;padding:8px 12px;font-size:12px;box-shadow:none;transition:none}
+.release-main .prompt-list button:hover {transform:none}
+.release-main .load-older {font-size:12px;border-radius:8px}
+.release-main .message-actions span {font-size:12px;padding:0 4px}
+.release-composer {max-width:900px;width:100%;padding:10px 0 18px;margin:0}
+.release-compose-line {padding:10px;gap:10px;border-color:#bccbb4;border-radius:12px}
+.release-compose-line:focus-within {border-color:var(--accent-dark)}
+.release-compose-line textarea {min-width:0;min-height:52px;font-size:14px;border-radius:0}
+.release-compose-line textarea:focus-visible {outline:none}
+.release-shell .release-compose-line>.release-attach {width:36px;height:36px;min-width:36px;padding:0;background:transparent;color:var(--r-muted);border-color:transparent;border-radius:6px;font-size:24px}
+.release-shell .release-send {flex:none;min-width:54px;padding:6px 8px;color:white;background:#355741;border-color:#355741;border-radius:6px;white-space:nowrap}
+.release-shell .release-send:hover:not(:disabled) {background:#456c51;border-color:#456c51}
+.release-compose-bottom {gap:8px;padding:10px 0 0;color:var(--r-muted)}
+.release-compose-bottom>button {font-size:12px;padding:6px 8px;min-height:32px;background:transparent;border-color:transparent}
+.release-compose-bottom .release-check {font-size:12px;margin:0;padding:6px 4px;min-height:32px;cursor:pointer}
+.release-compose-bottom .release-proactive {margin-left:auto}
+.character-stage {position:static;order:2;align-self:stretch;flex:0 0 280px;width:280px;min-height:0;max-height:620px;margin:8px 0 20px;display:flex;flex-direction:column;background:var(--r-paper);border:1px solid var(--r-line);border-radius:12px;overflow:auto;z-index:auto}
+.character-heading {display:flex;justify-content:space-between;align-items:center;padding:14px 14px 0;gap:10px}
+.character-heading strong {font-size:14px;font-weight:500;color:#5c7153}
+.character-heading button {width:30px;min-height:30px;padding:0;font-size:18px;background:#fffdf8b3}
+.character-stage canvas {display:block;width:100%;height:auto;min-height:0;object-fit:contain;flex:1}
+.character-controls {display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end;padding:14px;border-top:1px solid var(--r-line)}
+.character-controls label {display:grid;gap:5px;margin:0;font-size:12px}
+.character-controls select {width:100%;max-width:none;font-size:12px}
+.character-controls button {font-size:12px;min-height:36px}
+.release-modal header {gap:16px;margin-bottom:20px}
+.release-modal h2 {font-size:24px;font-weight:600;margin:0}
+.release-modal header>button {width:36px;height:36px;padding:0;flex-shrink:0;font-size:24px}
+.release-modal p {font-size:14px;line-height:1.8;color:var(--r-muted)}
+.release-modal .release-error {margin:12px 0}
+.release-tabs,.rp-tabs {display:flex;gap:4px 12px;border-bottom:1px solid var(--r-line);margin:0 0 22px;flex-wrap:wrap}
+.release-shell .release-tabs button,.release-shell .rp-tabs button {background:transparent;border:0;border-bottom:2px solid transparent;border-radius:0;padding:8px 4px;color:var(--r-muted);font-size:14px;white-space:nowrap}
+.release-shell .release-tabs button.active,.release-shell .rp-tabs button.active {border-color:var(--r-ink);color:var(--r-ink);font-weight:600}
+.release-local-tools small,.companion-panel small {font-size:12px}
+.companion-panel,.capability-panel {width:min(780px,100%)}
+.companion-panel footer {position:sticky;bottom:-28px;background:var(--r-paper);padding:16px 0;margin-bottom:0;z-index:1}
+.capability-panel form {padding:16px 0;border-top:1px solid var(--r-line);margin:16px 0}
+.capability-panel form small, .capability-memory small {font-size:12px}
+.capability-row {gap:8px;margin-bottom:12px}
+.capability-row b {min-width:120px;overflow-wrap:anywhere}
+.capability-row button {font-size:12px}
+.story-memory {padding:22px 0}
+.story-memory p {font-size:14px;line-height:1.8;color:var(--r-muted);margin:0 0 14px}
+.story-memory button {font-size:12px}
+.capability-memory {padding:20px 0}
+.capability-memory summary {cursor:pointer;font-size:14px}
+.release-shell .rp-backdrop {backdrop-filter:none;background:#1a302955}
+.release-shell .rp-drawer {width:min(740px,100%);background:var(--r-paper);box-shadow:none}
+.release-shell .rp-header {padding:24px 28px 20px;background:var(--r-paper)}
+.release-shell .rp-header h2 {font:600 24px 'PingFang SC','Microsoft YaHei',sans-serif;margin:0}
+.rp-tabs {margin:18px 28px 0;flex-shrink:0}
+.release-shell .rp-scroll {padding:0 28px 24px}
+.release-shell .rp-section {padding:22px 0}
+.release-shell .rp-explainer, .release-shell .rp-memory, .release-shell .rp-album-item p, .release-shell .rp-error, .release-shell .rp-footer button {font-size:12px}
+.release-shell .rp-section h3 {font:600 14px 'PingFang SC','Microsoft YaHei',sans-serif;margin:0 0 16px}
+.release-shell .rp-two label {margin:0}
+.release-shell .rp-input {font-size:14px;font-weight:400}
+.release-shell .rp-footer {padding:16px 28px;gap:10px;flex-wrap:wrap}
+.release-shell .rp-save {background:#355741;border-color:#355741;color:white}
+.release-shell .rp-save:hover:not(:disabled) {background:#456c51}
+@media(min-width:1600px){.character-stage{flex-basis:320px;width:320px}.release-story-workspace{gap:28px;padding:0 36px}.release-story-header{padding:24px 36px 18px}}
+@media(max-width:1200px){.release-nav{width:218px}.release-story-workspace{gap:14px;padding:0 20px}.character-stage{flex-basis:230px;width:230px}.release-story-header{padding:18px 20px}.release-compose-bottom .release-proactive{margin-left:0}}
+@media(max-width:1000px){.character-stage{flex-basis:190px;width:190px}.character-controls{padding:10px;gap:8px}.character-controls select{padding:7px 5px}.character-controls button{padding:6px 8px}.release-story-header>.release-story-actions{gap:6px}.release-story-actions>button{padding:8px 10px}}
+@media(max-width:780px){
+  .release-nav{width:244px;padding:24px 14px 12px}.release-topbar{height:58px;padding:0 16px}
+  .release-shell .release-mobile-menu{display:block;width:36px;padding:6px}
+  .release-story-header{padding:16px;gap:12px}.release-story-title{flex-basis:100%}.release-story-title h1{font-size:18px}
+  .release-story-header>.release-story-actions{justify-content:flex-start;max-width:none;width:100%;gap:6px}
+  .release-story-actions>button{font-size:12px;min-height:36px;padding:8px 10px}
+  .release-story-workspace{position:relative;padding:0 14px;gap:0;isolation:isolate}
+  .release-main .message-column{padding:16px 0 24px}.release-main .message-row{gap:8px}
+  .release-main .message-avatar{width:28px;height:28px}.release-main .message-bubble{padding:12px 14px}
+  .release-composer{padding:8px 0 12px}.release-compose-bottom{gap:6px}.release-compose-bottom>button,.release-compose-bottom .release-check{font-size:12px;padding:6px 8px}
+  .release-modal-backdrop{padding:12px}.release-modal{padding:20px;max-height:94dvh;border-radius:12px}
+  .companion-panel footer{bottom:-20px}.release-library{padding:20px 16px}.release-search{padding:0 16px 12px;gap:6px}
+  .release-shell .rp-header{padding:20px}.rp-tabs{margin:16px 20px 0}.release-shell .rp-scroll{padding:0 20px 20px}.release-shell .rp-footer{padding:14px 20px}
+  .companion-interest-form{flex-wrap:wrap}.companion-interest-form label:first-child{flex-basis:100%}
+}

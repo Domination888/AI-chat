@@ -1,0 +1,8 @@
+story:
+  mode: offline
+spring:
+  datasource:
+    driver-class-name: org.sqlite.JDBC
+    url: jdbc:sqlite:${STORY_SQLITE_FILE:${STORY_DATA:./story-data}/stories.sqlite}?busy_timeout=10000&foreign_keys=on&journal_mode=WAL
+    hikari:
+      maximum-pool-size: 1

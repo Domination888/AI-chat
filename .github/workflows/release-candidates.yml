@@ -1,0 +1,66 @@
+name: Build private release candidates
+on: [workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  desktop:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '24', cache: npm, cache-dependency-path: apps/desktop/package-lock.json}
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17', cache: maven}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: npm ci --ignore-scripts
+        working-directory: apps/desktop
+      - name: Verify offline runtime and client
+        shell: bash
+        run: |
+          ./tools/maven/mvnw -B -f apps/server/pom.xml -Poffline clean verify
+          npm --prefix apps/desktop test
+          npm --prefix apps/desktop run test:release
+          npm --prefix apps/desktop run build:cloud
+          npm --prefix apps/desktop run build:offline
+      - name: Freeze local speech runtime
+        shell: bash
+        run: |
+          python -m pip install -r apps/server/voice/requirements.txt
+          python -m PyInstaller --noconfirm --name story-voice --distpath packaging/release/staging/voice-dist --workpath packaging/release/staging/voice-work --specpath packaging/release/staging --collect-all sherpa_onnx --collect-all sherpa_onnx_core --collect-all soundfile apps/server/voice/server.py
+      - name: Install llama.cpp on macOS
+        if: runner.os == 'macOS'
+        run: brew install llama.cpp
+      - name: Download official CPU llama.cpp for Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $release = Invoke-RestMethod https://api.github.com/repos/ggml-org/llama.cpp/releases/latest
+          $asset = $release.assets | Where-Object { $_.name -match '^llama-.*-bin-win-cpu-x64.zip$' } | Select-Object -First 1
+          if (-not $asset) { throw 'Official Windows CPU runtime not found' }
+          Invoke-WebRequest $asset.browser_download_url -OutFile llama.zip
+          Expand-Archive llama.zip llama-runtime
+      - name: Stage native offline binaries
+        shell: bash
+        run: |
+          python scripts/release/stage-ci.py
+      - name: Package candidates without publishing
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          npm run package:commercial:user -- --publish never
+          npm run package:offline -- --publish never
+          npm run package:commercial:admin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ runner.os }}
+          path: |
+            apps/desktop/release-cloud/*.*
+            apps/desktop/release-offline/*.*
+            artifacts/StorySpace-commercial-admin.tar.gz
+      - name: Model-pack notice
+        run: echo "Installers omit weights. Run signed model-pack, 16GB device, offline-network and UI acceptance before inviting users."

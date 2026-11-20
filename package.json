@@ -1,0 +1,20 @@
+{
+  "name": "story-space-workspace",
+  "private": true,
+  "scripts": {
+    "setup": "bash scripts/setup-dev.sh",
+    "dev": "node scripts/workspace.cjs dev offline",
+    "dev:cloud": "npm run dev:commercial",
+    "build": "bash scripts/build-all.sh",
+    "test": "npm --prefix apps/desktop run check && ./tools/maven/mvnw -B -f apps/server/pom.xml -Poffline clean verify",
+    "package:offline": "node scripts/workspace.cjs package offline",
+    "package:cloud": "npm run package:commercial:user --",
+    "dev:offline": "node scripts/workspace.cjs dev offline",
+    "dev:commercial": "node scripts/workspace.cjs dev commercial",
+    "dev:admin": "node scripts/workspace.cjs dev admin",
+    "dev:otp": "node scripts/workspace.cjs otp",
+    "package:commercial:user": "node scripts/workspace.cjs package commercial",
+    "package:commercial:admin": "node scripts/workspace.cjs package admin",
+    "test:workflow": "node --test scripts/tests/workspace.test.cjs"
+  }
+}

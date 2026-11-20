@@ -1,0 +1,69 @@
+/* Existing setup and advanced settings retain their controls with the same surface language. */
+.settings-overlay,.setup-overlay{background:rgba(22,17,27,.7)!important;backdrop-filter:blur(8px)}
+.settings-dialog,.setup-dialog{border:1px solid var(--line)!important;border-radius:18px!important;background:var(--surface)!important;color:var(--ink)!important;box-shadow:0 25px 80px rgba(0,0,0,.22)!important}
+.settings-dialog>div:first-child{padding:21px 26px!important;background:var(--surface);border-color:var(--line)}
+.settings-dialog>div:first-child h3,.setup-dialog h2{font-family:Georgia,"Songti SC",serif;font-size:22px;font-weight:500}
+.settings-dialog aside{background:var(--paper)!important}
+.settings-dialog input,.settings-dialog select,.settings-dialog textarea,.setup-dialog input{background:var(--surface)!important;color:var(--ink)!important;border-color:var(--line)!important;border-radius:8px!important}
+.settings-dialog button.bg-blue-600,.setup-dialog button.bg-blue-600{background:var(--accent-dark)!important}
+.settings-dialog button.text-blue-600{color:var(--accent-dark)!important}
+
+@media(max-width:900px){.entry-screen{grid-template-columns:1fr 1fr}
+.entry-copy{top:28%;left:8%}
+.entry-copy h1{font-size:clamp(35px,5vw,56px)}
+.entry-art{bottom:-20%;right:-35%}
+.story-sidebar{width:225px}
+.story-header{padding:0 20px}
+.story-toolbar{padding:7px 20px}
+.header-actions button{padding:0 8px}
+}
+
+@media(max-width:700px){.entry-screen{display:block;overflow-y:auto}
+.entry-visual{min-height:340px}
+.entry-brand{top:24px;left:25px}
+.entry-copy{top:92px;left:27px;right:25px}
+.entry-copy h1{font-size:38px;margin:12px 0}
+.entry-copy p{font-size:12px}
+.entry-points{margin-top:15px}
+.entry-points span{font-size:9px;padding:6px 9px}
+.entry-art{width:330px;right:-115px;bottom:-220px}
+.entry-footnote{display:none}
+.entry-form-side{min-height:430px;padding:48px 26px 65px}
+.entry-form-wrap{margin:0 auto}
+.entry-form-wrap h2{font-size:29px}
+.login-form{margin-top:25px;gap:16px}
+.entry-form-footer{bottom:22px;left:26px;right:26px}
+.sidebar-backdrop{position:fixed;z-index:20;inset:0;background:rgba(14,12,19,.5)}
+.story-sidebar{position:fixed;top:0;bottom:0;left:0;width:min(84vw,290px);transform:translateX(-100%);transition:transform .25s}
+.story-sidebar.is-open{transform:translateX(0)}
+.mobile-close{display:grid;place-items:center;width:29px;height:29px;border:0;border-radius:6px;background:#413946;color:#fff}
+.story-header{height:65px;padding:0 14px}
+.mobile-menu{display:block;padding:4px 6px;border:0;background:none;color:var(--ink);font-size:19px}
+.header-avatar{width:35px;height:35px}
+.header-label strong{font-size:15px}
+.header-actions button span{display:none}
+.header-actions .header-new{padding:0 10px}
+.story-toolbar{min-height:42px;padding:6px 13px}
+.story-breadcrumb{font-size:8px}
+.story-quick-actions label{display:none}
+.story-quick-actions button{font-size:9px}
+.message-column{padding:22px 14px 35px}
+.story-welcome{min-height:calc(100dvh - 270px)}
+.story-welcome h2{font-size:25px}
+.prompt-list{grid-template-columns:1fr;margin:23px 0 20px;max-width:300px}
+.prompt-list button{min-height:42px}
+.composer-shell{padding:10px 12px 12px}
+.composer-hint span{display:none}
+.role-modal-backdrop{padding:10px}
+.role-modal,.role-explorer{max-height:92dvh}
+.explorer-header{padding:21px 18px 12px}
+.explorer-header h2{font-size:23px}
+.explorer-tools{padding:7px 18px 14px}
+.role-grid{grid-template-columns:1fr;padding:0 18px 20px}
+.role-card{min-height:155px}
+.role-art{min-width:110px}
+.role-art strong{font-size:55px}
+}
+
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;scroll-behavior:auto!important;transition-duration:.01ms!important}
+}

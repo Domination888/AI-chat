@@ -1,0 +1,18 @@
+{
+  "tool": "built-in imagegen",
+  "date": "2026-10-26",
+  "assets": [
+    {
+      "file": "garden-character.png",
+      "prompt": "Use case: stylized-concept. Asset type: portrait illustration for an anime romance companion game. Create a polished Japanese 2D anime visual novel character illustration, crisp ink outlines, cel shading, expressive large anime eyes, stylized face and hair, absolutely no photorealism or 3D. One clearly adult woman, age 24+, tasteful fully clothed outfit. Vertical 2:3 composition, centered head to upper thighs, face in upper third with comfortable top margin, beautiful simple softly painted fantasy background. No text, logos, UI or watermark. Character: Linjian, an original gentle forest elf bookshop keeper. Long sage green hair, pointed elven ears, amber eyes, small white flower hair clip. Cream blouse, moss green pinafore dress with gold botanical embroidery and brown belt. Holding a closed old book against her chest, warm playful smile. Cozy enchanted bookshop with greenery, warm sun through arched window. Palette sage, ivory, warm gold."
+    },
+    {
+      "file": "observatory-character.png",
+      "prompt": "Use case: stylized-concept. Asset type: portrait illustration for an anime romance companion game. Create a polished Japanese 2D anime visual novel character illustration, crisp ink outlines, cel shading, expressive large anime eyes, stylized face and hair, absolutely no photorealism or 3D. One clearly adult woman, age 24+, tasteful fully clothed outfit. Vertical 2:3 composition, centered head to upper thighs, face in upper third with comfortable top margin, beautiful simple softly painted fantasy background. No text, logos, UI or watermark. Character: Xingyao, an original curious star mage and observatory keeper. Long midnight blue hair fading to lavender, violet eyes, gold crescent hair ornament. Navy and ivory astronomer dress, short elegant star embroidered cape, brass astrolabe pendant. Holding a small glowing celestial globe, lively confident smile. Moonlit fantasy observatory with telescope and large circular window framing stars. Palette deep indigo, lavender, silver and gold."
+    },
+    {
+      "file": "voyager-character.png",
+      "prompt": "Use case: stylized-concept. Asset type: portrait illustration for an anime romance companion game. Create a polished Japanese 2D anime visual novel character illustration, crisp ink outlines, cel shading, expressive large anime eyes, stylized face and hair, absolutely no photorealism or 3D. One clearly adult woman, age 24+, tasteful fully clothed outfit. Vertical 2:3 composition, centered head to upper thighs, face in upper third with comfortable top margin, beautiful simple softly painted fantasy background. No text, logos, UI or watermark. Character: Chixia, an original adventurous fox spirit swordswoman, warm independent reliable personality. Auburn red long hair in loose high ponytail, reddish fox ears, one fluffy russet fox tail, golden eyes. Ivory and crimson fantasy traveling outfit with modest wrap tunic, dark fitted trousers, short crimson cape and leather gloves, sheathed sword at waist. Relaxed confident friendly smile, one hand near shoulder strap. Sunset fantasy road with distant mountains and drifting maple leaves. Palette rust red, cream, amber."
+    }
+  ]
+}

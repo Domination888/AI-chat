@@ -1,0 +1,40 @@
+{
+  "format": "story-model-pack-v1",
+  "version": "0.1.0",
+  "models": {
+    "llm": {
+      "name": "Qwen3-4B",
+      "file": "llm/Qwen3-4B-Q4_K_M.gguf",
+      "source": "https://huggingface.co/Qwen/Qwen3-4B-GGUF",
+      "license": "Apache-2.0"
+    },
+    "embedding": {
+      "name": "Qwen3-Embedding-0.6B",
+      "file": "embedding/Qwen3-Embedding-0.6B-Q8_0.gguf",
+      "source": "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF",
+      "license": "Apache-2.0"
+    },
+    "asr": {
+      "name": "SenseVoiceSmall",
+      "source": "https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models",
+      "license": "FunASR Model License; preserve attribution and model name",
+      "file": "asr/model.int8.onnx",
+      "tokens": "asr/tokens.txt"
+    },
+    "tts": {
+      "name": "Kokoro-82M-v1.1-zh",
+      "file": "tts/model.onnx",
+      "voices": "tts/voices.bin",
+      "source": "https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models",
+      "license": "Apache-2.0",
+      "tokens": "tts/tokens.txt",
+      "dataDir": "tts/espeak-ng-data",
+      "dictDir": "tts/dict",
+      "lexicons": [
+        "tts/lexicon-us-en.txt",
+        "tts/lexicon-zh.txt"
+      ],
+      "speaker": 50
+    }
+  }
+}

@@ -1,0 +1,169 @@
+html, body, #app {margin:0; min-height:100%}
+:root {
+  --r-bg:#f6f4ee;
+  --r-paper:#fffdf8;
+  --r-ink:#263c34;
+  --r-muted:#667168;
+  --r-line:#d8ded3;
+  --r-accent:#a96148;
+}
+* {box-sizing:border-box}
+.release-shell {
+  height:100dvh;
+  display:flex;
+  background:var(--r-bg);
+  color:var(--r-ink);
+  font-family:'PingFang SC','Microsoft YaHei',sans-serif;
+  font-size:14px;
+}
+.release-shell button, .release-shell input, .release-shell textarea, .release-shell select {font:inherit}
+.release-shell button {
+  cursor:pointer;
+  background:var(--r-paper);
+  border:1px solid var(--r-line);
+  border-radius:8px;
+  min-height:36px;
+  padding:8px 13px;
+  line-height:1.4;
+  color:inherit;
+}
+.release-shell button:hover:not(:disabled) {background:#eaf0e5; border-color:#acbca8}
+.release-shell button:focus-visible, .release-shell input:focus-visible, .release-shell textarea:focus-visible,
+.release-shell select:focus-visible, .release-shell summary:focus-visible, .release-shell a:focus-visible {
+  outline:2px solid var(--r-accent);
+  outline-offset:3px;
+}
+.release-shell h1, .release-shell h2, .release-shell h3, .release-shell p {margin:0}
+.release-shell input, .release-shell textarea {
+  width:100%;
+  padding:11px 13px;
+  border:1px solid var(--r-line);
+  border-radius:8px;
+  background:var(--r-paper);
+  color:var(--r-ink);
+}
+.release-shell label {display:block; margin:15px 0; font-size:14px; line-height:1.8}
+.release-shell label input, .release-shell label textarea {margin-top:5px}
+.release-brand {display:block; color:var(--r-ink); font-size:24px; font-weight:600; text-decoration:none}
+.release-shell .release-primary {background:var(--r-ink); color:var(--r-paper); padding:10px 16px}
+.release-shell .release-text {font-size:12px; color:var(--r-muted); background:transparent; border-color:transparent}
+.release-toast {
+  position:fixed;
+  z-index:100;
+  bottom:24px;
+  left:50%;
+  transform:translateX(-50%);
+  max-width:90%;
+  display:flex;
+  align-items:center;
+  gap:20px;
+  padding:12px 16px;
+  border-radius:8px;
+  background:var(--r-ink);
+  color:white;
+}
+.release-shell .release-loading {margin:auto; color:var(--r-muted)}
+.release-entry {display:flex; flex-direction:column; width:100%; min-height:0}
+.release-entry-header {padding:18px 32px; border-bottom:1px solid var(--r-line)}
+.release-entry-form {display:flex; flex:1; align-items:safe center; justify-content:center; padding:32px; overflow:auto}
+.release-form {width:100%; max-width:360px}
+.release-form h1 {font-size:24px; font-weight:600; margin:0 0 24px}
+.release-form .release-primary {width:100%; margin-top:6px}
+.release-form>small {display:block; color:var(--r-muted); font-size:12px; line-height:1.7; margin-top:14px}
+.release-auth-actions {display:flex; align-items:center; flex-wrap:wrap; gap:4px 12px; margin-top:16px}
+.release-shell .release-auth-actions button {padding:4px 0}
+.release-inline {display:flex; gap:8px}
+.release-inline input {min-width:0}
+.release-inline button {margin-top:5px; white-space:nowrap; font-size:12px}
+.release-error {color:#a74738!important; font-size:12px; line-height:1.8}
+.release-nav {
+  display:flex;
+  flex-direction:column;
+  flex-shrink:0;
+  border-right:1px solid var(--r-line);
+}
+.release-nav-heading {display:flex; align-items:center; justify-content:space-between; color:var(--r-muted)}
+.release-chapters {flex:1; overflow:auto}
+.release-chapters>button {display:block; width:100%; text-align:left}
+.release-chapters small {display:block; color:var(--r-muted)}
+.release-chapters p {padding:12px; color:var(--r-muted); font-size:12px}
+.release-nav-bottom {border-top:1px solid var(--r-line)}
+.release-account {display:flex; align-items:center; width:100%; text-align:left}
+.release-account>span {width:34px; height:34px; flex:none; display:grid; place-items:center; background:var(--r-ink); color:white; border-radius:50%}
+.release-account div {flex:1}
+.release-main {min-width:0; flex:1; display:flex; flex-direction:column; overflow:hidden}
+.release-topbar {display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--r-line); flex-shrink:0}
+.release-topbar>span {color:var(--r-muted)}
+.release-mobile-menu, .release-nav-scrim {display:none}
+.release-library {overflow:auto; flex:1}
+.release-section-heading {display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:22px}
+.release-section-heading h1 {font-size:24px; font-weight:600}
+.release-library-actions {display:flex; gap:8px; flex-wrap:wrap}
+.release-role-grid {display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:24px 22px}
+.release-role-card {min-width:0; background:var(--r-paper); border:1px solid var(--r-line); border-radius:12px}
+.release-role-card h2 {font-size:18px; font-weight:600}
+.release-shell .release-role-art {
+  display:block;
+  width:100%;
+  padding:0;
+  border:0;
+  border-radius:11px 11px 0 0;
+  background:transparent;
+  text-align:left;
+  overflow:hidden;
+}
+.release-role-art img, .release-role-placeholder {display:block; width:100%; height:190px}
+.release-role-art img {object-fit:cover; object-position:center top}
+.release-role-placeholder {display:grid; place-items:center; background:#edf1e8; color:var(--r-muted); font-size:24px}
+.release-role-name {display:block; padding:14px 16px 10px; overflow-wrap:anywhere}
+.release-role-art:hover .release-role-name {text-decoration:underline}
+.release-role-card p {padding:0 16px 16px; color:var(--r-muted); line-height:1.7; overflow-wrap:anywhere}
+.release-shell .release-role-card .release-text {margin:0 8px 8px}
+.release-story-header {display:flex; justify-content:space-between}
+.release-story-role {display:block; margin-top:4px; color:var(--r-muted); font-size:12px}
+.release-search {display:flex; gap:10px}
+.release-main .message-viewport {flex:1; min-height:0}
+.release-composer {align-self:center; flex-shrink:0}
+.release-compose-line {display:flex; align-items:center; background:var(--r-paper); border:1px solid var(--r-line)}
+.release-compose-line textarea {border:0; background:none; resize:none; padding:4px; line-height:1.8; max-height:140px}
+.release-compose-bottom {display:flex; align-items:center; flex-wrap:wrap}
+.release-image-preview {display:flex; gap:10px; padding-bottom:10px}
+.release-image-preview button {font-size:12px}
+.release-image-preview img {height:60px; width:70px; object-fit:cover; border-radius:6px}
+.release-modal-backdrop {
+  position:fixed;
+  inset:0;
+  z-index:50;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:30px;
+  background:#1a302955;
+}
+.release-modal {
+  width:660px;
+  max-width:100%;
+  max-height:90dvh;
+  overflow:auto;
+  padding:28px;
+  border:1px solid var(--r-line);
+  border-radius:16px;
+  background:var(--r-paper);
+}
+.release-modal header {display:flex; align-items:center; justify-content:space-between}
+.release-setting-status {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:12px 0;
+  border-block:1px solid var(--r-line);
+  margin-top:16px;
+}
+.release-setting-status b {font-weight:600; overflow-wrap:anywhere}
+.release-button-row, .release-data-actions {display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:20px 0}
+.release-data-actions {border-top:1px solid var(--r-line); padding-top:16px}
+.release-shell .release-check {display:flex; align-items:center; gap:10px}
+.release-check input {width:auto; margin:0!important}
+.release-local-tools h3 {font-size:14px; font-weight:600; margin-bottom:12px}
+.release-local-tools small {display:block; color:var(--r-muted); line-height:1.8; margin:10px 0 16px}

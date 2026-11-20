@@ -1,0 +1,50 @@
+# Only local development; independent project and volumes from deployment/cloud.
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: stories
+      POSTGRES_DB: stories
+      POSTGRES_PASSWORD: ${STORY_DEV_DB_PASSWORD:?}
+    ports: ["127.0.0.1::5432"]
+    volumes: ["database:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stories -d stories"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  objects:
+    build:
+      context: ../..
+      dockerfile: deployment/cloud/minio.Dockerfile
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: ${STORY_DEV_S3_ACCESS:?}
+      MINIO_ROOT_PASSWORD: ${STORY_DEV_S3_SECRET:?}
+    ports: ["127.0.0.1::9000"]
+    volumes: ["objects:/data"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  objects-init:
+    build:
+      context: ../..
+      dockerfile: deployment/cloud/object-init.Dockerfile
+    environment:
+      ACCESS: ${STORY_DEV_S3_ACCESS:?}
+      SECRET: ${STORY_DEV_S3_SECRET:?}
+    depends_on:
+      objects: {condition: service_healthy}
+  mail:
+    image: axllent/mailpit:v1.27.8
+    ports: ["127.0.0.1::1025", "127.0.0.1::8025"]
+  egress:
+    build:
+      context: ../..
+      dockerfile: deployment/cloud/egress.Dockerfile
+    ports: ["127.0.0.1::3128"]
+volumes:
+  database:
+  objects:

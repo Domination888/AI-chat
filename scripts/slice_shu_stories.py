@@ -5,7 +5,7 @@
 ================================
 
 把 data/raw/shu/stories/huai-shu-li/*.md 切成适合 RAG 检索的剧情节点，写到：
-    backend/src/main/resources/personas/shu/lore/stories/
+    .local/personal/personas/shu/lore/stories/
 
 注意：当前仓库中的 lore/stories/ 是人工理解后的剧情摘要语料，不是本脚本生成的
 raw 台词切片。为避免误覆盖，脚本默认只提示用途；如确实需要生成原文切片，
@@ -29,7 +29,7 @@ from pathlib import Path
 
 WORKSPACE = Path(__file__).resolve().parent.parent
 INPUT_DIR = WORKSPACE / "data" / "raw" / "shu" / "stories" / "huai-shu-li"
-OUTPUT_DIR = WORKSPACE / "backend" / "src" / "main" / "resources" / "personas" / "shu" / "lore" / "stories"
+OUTPUT_DIR = WORKSPACE / ".local" / "personal" / "personas" / "shu" / "lore" / "stories"
 
 TARGET_CHARS = 420
 SOFT_MAX_CHARS = 560

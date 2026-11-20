@@ -1,0 +1,25 @@
+const categories={
+ account_suspended:['账号已暂停','管理员已暂停账号，本次生成已取消；恢复账号后可重试。'],
+ account_deleted:['账号已删除','账号删除导致生成终止。'],
+ client_disconnected:['客户端连接中断','连接已断开，不能据此判断为用户主动停止。'],
+ request_timeout:['请求已超时','请求等待超时，本次生成已取消。'],
+ application_shutdown:['应用已关闭','应用关闭导致生成终止。'],
+ operation_interrupted:['操作已取消','其它操作中断了生成，未标记为用户主动停止。'],
+ user_interrupted:['用户已停止','这是主动中断，不代表服务故障。'],
+ storage_failed:['存储失败','检查数据库连接、磁盘空间和写入权限。'],
+ network_timeout:['连接超时','检查模型服务响应时间与网络连接。'],
+ network_connection_failed:['连接未建立','检查服务是否运行及网络、DNS配置。'],
+ upstream_auth_failed:['上游认证失败','检查模型凭据与访问权限。'],
+ upstream_rate_limited:['上游限流','稍后重试，并检查服务配额。'],
+ upstream_unavailable:['上游服务异常','检查模型服务状态，稍后重试。'],
+ upstream_request_rejected:['上游拒绝请求','检查模型及接口兼容配置。'],
+ model_tools_unsupported:['模型不支持工具调用','请改用支持工具调用的模型，或关闭相关 MCP 工具后重试。'],
+ model_empty_output:['模型无可见输出','检查模型输出和接口兼容性。'],
+ model_stream_incomplete:['模型流提前结束','检查模型服务和网络稳定性。'],
+ model_output_contract:['输出格式未满足要求','检查技能要求及模型结构化输出能力。'],
+ invalid_input:['请求参数无效','检查提交的参数与配置。'],
+ internal_failed:['原因未细分','结合服务运行日志排查；此记录不包含具体原因。'],
+ failed:['历史失败记录','旧记录未细分原因，无法据此判断故障来源。'],
+ interrupted:['历史中断记录','旧记录未区分中断来源。']
+}
+export function failureDescription(code){const [label,hint]=Object.hasOwn(categories,code)?categories[code]:categories.internal_failed;return `${label}：${hint}`}

@@ -1,0 +1,45 @@
+{
+  "name": "ai-chat-electron",
+  "version": "1.0.0",
+  "description": "AI Chat Electron Client",
+  "main": "electron/release-main.cjs",
+  "author": "AI-Chat",
+  "scripts": {
+    "dev": "node ../../scripts/workspace.cjs dev offline",
+    "build": "npm run build:offline",
+    "build:mac": "npm run package:offline -- --mac",
+    "build:win": "npm run package:offline -- --win",
+    "postinstall": "node electron/prepare-macos-location.js",
+    "test": "node --test tests/*.test.mjs",
+    "check": "npm test && npm run test:release && npm run build:offline",
+    "build:cloud": "vite build --mode cloud",
+    "build:offline": "vite build --mode offline",
+    "build:admin": "vite build --mode admin",
+    "test:release": "node --test release-tests/*.test.cjs release-tests/*.test.mjs",
+    "package:cloud": "node ../../scripts/workspace.cjs package commercial",
+    "package:offline": "node ../../scripts/workspace.cjs package offline",
+    "dev:cloud": "node ../../scripts/workspace.cjs dev commercial",
+    "dev:admin": "node ../../scripts/workspace.cjs dev admin",
+    "package:admin": "node ../../scripts/workspace.cjs package admin"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.10",
+    "autoprefixer": "^10.5.0",
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3",
+    "postcss": "^8.5.15",
+    "tailwindcss": "^3.4.19",
+    "vite": "^8.3.4"
+  },
+  "build": {
+    "extends": "./electron-builder.release.cjs"
+  },
+  "dependencies": {
+    "@pixi/unsafe-eval": "^7.4.3",
+    "pixi-live2d-display-lipsyncpatch": "^0.5.0-ls-8",
+    "pixi.js": "^7.4.3",
+    "vue": "^3.4.21"
+  },
+  "private": true,
+  "storyDistribution": "offline"
+}

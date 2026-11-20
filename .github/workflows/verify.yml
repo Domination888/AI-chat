@@ -1,0 +1,24 @@
+name: Verify
+on: [push, pull_request]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            apps/desktop/package-lock.json
+      - run: npm --prefix apps/desktop ci
+      - run: ./tools/maven/mvnw -B -f apps/server/pom.xml -Poffline clean verify
+      - run: npm run test:workflow
+      - run: npm --prefix apps/desktop run check
+      - run: npm --prefix apps/desktop run build:cloud
+      - run: npm --prefix apps/desktop run build:admin

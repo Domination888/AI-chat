@@ -1,0 +1,108 @@
+  <div class="release-shell" :aria-busy="installingModels">
+    <div v-if="notice && !accountOpen" class="release-toast" :role="noticeIsError?'alert':'status'" @mouseenter="pauseNotice('pointer')" @mouseleave="resumeNotice('pointer')" @focusin="pauseNotice('focus')" @focusout="resumeNotice('focus')">{{ notice }}<button @click="clearNotice" aria-label="关闭通知">×</button></div>
+    <p v-if="booting" class="release-loading" role="status">正在加载…</p>
+    <section v-else-if="!me" class="release-entry">
+      <header class="release-entry-header"><span class="release-brand">幕间</span></header>
+      <div class="release-entry-form">
+        <form v-if="!connected" class="release-form" @submit.prevent="connectServer">
+          <h1>连接服务</h1>
+          <label>邀请方提供的服务地址<input v-model="server" placeholder="https://story.example.com" type="url" required /></label>
+          <button class="release-primary" :disabled="busy">连接</button>
+        </form>
+        <form v-else class="release-form" @submit.prevent="authenticate">
+          <h1>{{ register ? '邀请注册' : '登录' }}</h1>
+          <label v-if="register">称呼<input v-model="credentials.username" maxlength="40" autocomplete="nickname" required /></label>
+          <label>邮箱<input v-model="credentials.email" type="email" autocomplete="email" required /></label>
+          <label>密码<input v-model="credentials.password" type="password" :autocomplete="register?'new-password':'current-password'" minlength="10" required /></label>
+          <template v-if="register">
+            <label>邀请码<input v-model="credentials.invitation" required autocomplete="off" /></label>
+            <label>邮箱验证码<div class="release-inline"><input v-model="credentials.code" inputmode="numeric" maxlength="6" required /><button type="button" :disabled="busy || codeWait>0" @click="sendCode">{{ codeWait ? `${codeWait} 秒后重发` : '发送验证码' }}</button></div></label>
+          </template>
+          <p v-if="authNotice" class="release-error" role="alert">{{ authNotice }}</p>
+          <p v-if="error" class="release-error" role="alert">{{ error }}</p>
+          <button class="release-primary" :disabled="busy">{{ busy ? '请稍候…' : register ? '注册' : '登录' }}</button>
+          <small v-if="!desktop">刷新页面后需要重新登录。</small>
+          <div class="release-auth-actions">
+            <button type="button" class="release-text" @click="register=!register">{{ register ? '返回登录' : '使用邀请码注册' }}</button>
+            <button type="button" class="release-text" @click="connected=false">更换服务地址</button>
+          </div>
+        </form>
+      </div>
+    </section>
+    <template v-else>
+      <aside class="release-nav release-user-nav" :class="{open:mobileNav}" :inert="installingModels || undefined" aria-label="主导航">
+        <a class="release-brand" href="#" @click.prevent="page='library';mobileNav=false">幕间</a>
+        <nav class="release-nav-links">
+          <button class="release-nav-item" :class="{active:page==='library'&&!companionOpen}" @click="page='library';mobileNav=false">角色与故事</button>
+          <button class="release-nav-item" :class="{active:page==='story'&&!companionOpen}" :disabled="!conversation" @click="page='story';mobileNav=false">当前对话</button>
+          <button class="release-nav-item" :class="{active:companionOpen&&companionTab==='daily'}" @click="openCompanion('daily')">AI 日报 <i v-if="dailyStatus.unread" class="release-unread" aria-label="有未读日报"></i></button>
+          <button class="release-nav-item" :class="{active:page==='guide'&&!companionOpen}" @click="openGuide">功能导览</button>
+        </nav>
+        <div class="release-nav-heading">最近篇章 <button @click="newStory" :disabled="!selected" aria-label="开启独立新故事" title="开启独立新故事">＋</button></div>
+        <div class="release-chapters"><button v-for="c in chapters" :key="c.id" :class="{active:page==='story'&&conversation===c.id}" @click="openChapter(c)"><span>{{ c.title }}</span><small>{{ roleName(c.role_id) }}</small></button><p v-if="!chapters.length">暂无篇章</p></div>
+        <div class="release-nav-bottom">
+          <button class="release-nav-item" :class="{active:companionOpen&&companionTab!=='daily'}" @click="openCompanion('world')">陪伴偏好</button>
+          <button class="release-nav-item" :class="{active:toolsOpen}" @click="openTools()">工具与技能</button>
+          <button class="release-account" @click="openAccount" aria-label="打开设置"><span>{{ me.username?.charAt(0) || '我' }}</span><div>{{ me.username }}</div><b>设置</b></button>
+        </div>
+      </aside>
+      <button v-if="mobileNav" class="release-nav-scrim" @click="mobileNav=false" aria-label="关闭导航"></button>
+      <main class="release-main" :inert="installingModels || undefined">
+        <header class="release-topbar"><button class="release-mobile-menu" @click="mobileNav=!mobileNav" :aria-expanded="mobileNav" aria-label="打开导航">☰</button><span v-if="page!=='guide'">{{ page==='library'?'角色与故事':'当前对话' }}</span><button @click="openAccount">模型连接</button></header>
+        <section v-if="page==='library'" class="release-library">
+          <div class="release-section-heading">
+            <h1>选择角色</h1>
+            <div class="release-library-actions">
+              <button @click="roleForm={name:'',profile:'',background:'',personality:'',greeting:''};showRoleForm=true">创建角色</button>
+              <button v-if="chapters.length" class="release-primary" @click="openChapter(chapters[0])">继续上次的故事</button>
+            </div>
+          </div>
+          <div v-if="offline && !model.custom && !nativeInfo.modelPackInstalled && !nativeInfo.externalModels" class="release-install-note" role="status">
+            <p>对话需要模型。请导入离线模型包或连接本地模型。</p>
+            <button @click="openAccount">设置模型</button>
+          </div>
+          <div class="release-role-grid">
+            <article v-for="r in roles" :key="r.id" class="release-role-card">
+              <h2>
+                <button class="release-role-art" :aria-label="`与${r.name}开始对话`" @click="choose(r)">
+                  <img v-if="r.avatar" :src="r.avatar" alt="" />
+                  <span v-else class="release-role-placeholder" aria-hidden="true">{{ r.name.charAt(0) }}</span>
+                  <span class="release-role-name">{{ r.name }}</span>
+                </button>
+              </h2>
+              <p v-if="r.profile">{{ r.profile }}</p>
+              <button v-if="r.ownerId" class="release-text" :aria-label="`编辑角色 ${r.name}`" @click="editRole(r)">编辑角色</button>
+            </article>
+          </div>
+        </section>
+        <FeatureGuide v-else-if="page==='guide'" :has-conversation="!!conversation" :has-character="!!nativeInfo.characterAvailable&&roles.some(r=>r.roleCode==='shu')" :offline="offline" :mode="conversationState?.mode" :mode-switching="modeBusy" @navigate="navigateGuide" />
+        <template v-else>
+          <div class="release-story-header">
+            <div class="release-story-title"><h1>{{ currentChapter?.title || '新篇章' }}</h1><span v-if="selected?.name" class="release-story-role">{{ selected.name }}</span></div>
+            <div class="release-story-actions">
+              <button class="release-search-toggle" :class="{'is-selected':showSearch}" :aria-expanded="showSearch" aria-label="搜索对话" title="搜索对话" @click="toggleSearch">搜索</button>
+              <button @click="openScene()">故事与记忆</button>
+              <button v-if="selected?.roleCode==='shu' && nativeInfo.characterAvailable" :class="{'is-selected':showCharacter}" :aria-pressed="showCharacter" @click="showCharacter=!showCharacter">角色形象</button>
+              <button :disabled="busy" @click="newStory" title="开启一个独立的故事">独立新故事</button>
+              <button class="release-primary" :disabled="busy" @click="continueCurrentStory" title="带上当前场景、关系和经历，继续同一个故事">延续新章</button>
+              <div class="release-chapter-menu" ref="chapterMenu"><button type="button" aria-label="篇章更多操作" title="篇章更多操作" :aria-expanded="chapterMenuOpen" aria-controls="chapter-actions" @click="chapterMenuOpen=!chapterMenuOpen">•••</button><div v-if="chapterMenuOpen" id="chapter-actions"><button type="button" class="release-danger" aria-label="删除当前篇章" @click="chapterMenuOpen=false;deleteChapter()">删除当前篇章</button></div></div>
+            </div>
+          </div>
+          <div class="release-story-mode"><span>{{ conversationState?.mode==='companion'?'现实陪伴 · 使用当地时间':conversationState?.mode==='story'?'剧情时间 · 离开后暂停':'正在读取对话方式…' }}</span><template v-if="conversationState?.mode==='story'"><button :disabled="modeBusy" @click="switchConversationMode('companion')">切换为现实陪伴</button></template><template v-else-if="conversationState?.mode==='companion'"><span>{{ conversationState.paused?'当前篇章已暂停主动搭话。':'主动搭话需开启偏好，并保持篇章连接。' }}</span><button @click="openCompanion('proactive')">主动搭话设置</button></template></div>
+          <form v-if="showSearch" class="release-search" @submit.prevent="loadMessages"><input v-model="search" placeholder="搜索当前篇章" aria-label="搜索对话"/><button class="release-primary">搜索</button><button type="button" @click="clearSearch">清除</button></form>
+          <div class="release-story-workspace" :class="{'has-character':selected?.roleCode==='shu'&&nativeInfo.characterAvailable&&showCharacter}">
+          <CharacterStage :enabled="page==='story'&&selected?.roleCode==='shu'&&nativeInfo.characterAvailable&&showCharacter" @close="showCharacter=false" @interact="text=$event;send()" @failure="toast" />
+          <div class="release-conversation-pane">
+          <ChatMessageList :external-links="true" @source="openSource" @feedback="feedback" ref="messageList" :messages="messages" :search-query="appliedSearch" @clear-search="clearSearch" :selected-role="selected" :has-older="hasOlder" :loading="generating" @older="older" @branch="branch" @rewind="rewind" @edit="editMessage" @regenerate="rewrite" @continue-reply="index=>rewrite(index,true)" @bookmark="bookmark" @prompt="text=$event" />
+          <div class="release-composer"><section v-if="offline" aria-label="本地服务状态"><p v-for="service in localServiceNotices(nativeInfo)" :key="service.kind" class="release-native-status" role="status">{{ service.text }} <button v-if="service.retryAvailable" :disabled="localRetryBusy" @click="retryLocalService(service.kind)">重试本地服务</button></p></section><div v-if="offlineModelMissing" class="release-native-status" role="status"><p>导入离线模型包或连接模型后即可对话。草稿和照片仍可保存。</p><button @click="openAccount">设置模型</button></div><p v-if="offline && nativeInfo.modelState==='starting' && !model.custom" class="release-native-status">{{ nativeInfo.modelProgress || '模型正在准备' }}。故事和场景已可浏览，准备完成后就能对话。</p><section v-if="failedDrafts.length" class="release-unsent-drafts" aria-label="未发送的草稿"><p role="status">暂存的内容尚未发送。恢复时，当前输入的草稿也会保留。</p><div v-for="draft in failedDrafts" :key="draft.id"><span>{{ draft.text.slice(0,70) || '未发送的照片' }}{{ draft.images.length ? ` · ${draft.images.length} 张照片` : '' }}</span><button @click="restoreFailedDraft(draft.id)">恢复草稿</button></div></section><p v-if="pendingContinuation" role="status">继续之前未完成的回复 <button @click="pendingContinuation=null">取消继续</button></p><p v-if="pendingDailyIssue" role="status">正在讨论 {{ pendingDailyIssue.date }} 期日报 <button @click="pendingDailyIssue=null">取消选刊</button></p><div v-if="images.length" class="release-image-preview"><button v-for="(img,i) in images" :key="img" @click="images.splice(i,1)" :aria-label="`移除图片 ${i+1}`"><img :src="img" alt="待发送照片"/>×</button></div><div class="release-compose-line"><button class="release-attach" @click="fileInput.click()" aria-label="添加照片" title="添加照片">＋</button><input ref="fileInput" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden @change="addImages"/><textarea v-model="text" @input="proactive.activity" rows="2" maxlength="6000" placeholder="输入消息" aria-label="输入消息" @keydown.enter.exact.prevent="!$event.isComposing && send()"></textarea><button v-if="generating" class="release-send" @click="stop" :disabled="stopping" :aria-label="stopping?'正在停止回复':'停止回复'">{{ stopping?'停止中…':'停止' }}</button><button v-else class="release-send" @click="send" :disabled="sendDisabled" aria-label="发送消息">发送</button></div><div class="release-compose-bottom"><button :aria-label="isRecording?'结束录音并发送':'语音输入'" @click="toggleRecording">{{ isRecording?'结束录音并发送':'语音输入' }}</button><button v-if="isRecording" @click="cancelRecording">取消录音</button><button :disabled="!speaking && !messages.some(m=>m.role==='ai')" @click="speaking?speech.stop():readLast()">{{ speaking?(speech.phase.value==='preparing'?'取消朗读':'停止朗读'):'朗读最新回复' }}</button><label class="release-check"><input type="checkbox" v-model="webSearch" @change="setWebSearch"/>联网搜索</label><label class="release-check"><input type="checkbox" v-model="autoRead" @change="autoRead?speech.unlock():speech.stop()"/>自动朗读</label><button class="release-proactive" :disabled="generating" @click="triggerProactive">请角色开场</button></div></div>
+          </div></div>
+        </template>
+      </main>
+      <RpPanel :show-memory-status="true" :proactive-enabled="true" :show="showScene" :initial-tab="sceneTab" :conversation-id="conversation" @close="showScene=false" @saved="refreshStory" @continue="continueWorld"><template #memory><StoryMemory :conversation-id="conversation" /></template></RpPanel>
+    </template>
+    <ActionDialog v-if="actionDialog" :key="actionDialog.requestId" :options="actionDialog" @resolve="settleAction" />
+    <CapabilityPanel :show="toolsOpen" :initial-tab="toolsTab" @close="toolsOpen=false" />
+    <CompanionPanel :show="companionOpen" :initial-tab="companionTab" :conversation-id="conversation" @close="companionOpen=false" @saved="loadDailyStatus" @daily-state="acceptDailyStatus" @discuss="discussDaily" />
+    <div v-if="accountOpen" class="release-modal-backdrop" @click.self="!installingModels && (accountOpen=false)"><section class="release-modal" role="dialog" aria-modal="true" aria-label="设置" :aria-busy="installingModels"><header><h2>设置</h2><button :disabled="installingModels" @click="accountOpen=false" aria-label="关闭">×</button></header><p v-if="installingModels" class="release-setting-notice" role="status" aria-live="polite">{{ nativeInfo.modelProgress || '请选择已解压的离线模型包文件夹' }}。首次准备可能需要几分钟；完成后自动恢复操作，选择文件夹时仍可取消。</p><fieldset :disabled="installingModels" class="release-settings-fields"><div class="release-tabs" aria-label="设置分类"><button :class="{active:accountTab==='model'}" @click="accountTab='model'">模型连接</button><button :class="{active:accountTab==='data'}" @click="accountTab='data'">数据与账号</button></div><div v-show="accountTab==='model'"><p>{{ offline?'默认使用离线模型包，也可以连接你自己运行的本地模型。':'使用平台模型，或连接你自己的聊天模型 API。密钥仅用于你的账号，保存后不会回显。' }}</p><p class="release-model-help">{{ offline?'完整离线模型包还可准备记忆检索、语音输入和朗读所需的本地服务。':'记忆检索、语音输入和朗读由服务方提供。' }}</p><div class="release-setting-status"><span>当前：{{ model.custom?'自定义模型':offline?'内置模型':'平台模型' }}</span><b>{{ model.model }}</b></div><label>API 地址<input v-model="model.baseUrl" :placeholder="offline?'http://127.0.0.1:12345/v1':'https://api.example.com/v1'"/></label><label>模型名称<input v-model="model.model" placeholder="服务商提供的模型 ID" maxlength="200"/></label><label>API 密钥<input v-model="model.apiKey" type="password" autocomplete="off" :placeholder="model.hasKey?'已保存；留空保留原密钥':'输入 API 密钥'"/></label><label v-if="offline" class="release-check"><input v-model="model.allowNetwork" type="checkbox"/>允许连接我填写的公网 API（会将对话发送给该服务）</label><div class="release-button-row"><button class="release-primary" :disabled="busy" @click="saveModel">保存连接</button><button :disabled="busy" @click="testModel">测试已保存连接</button><button :disabled="busy" @click="resetModel">{{ offline?'恢复内置模型':'使用平台模型' }}</button></div><button v-if="offline&&desktop" :disabled="busy" @click="installModels">导入离线模型包</button></div><div v-show="accountTab==='data'"><div v-if="offline" class="release-local-tools"><h3>导入数据</h3><button @click="importInput.click()">导入故事备份</button><input ref="importInput" type="file" accept="application/json,.json" hidden @change="importData"/><small>仅支持导入本应用的备份。导入前，本地目录须没有故事。文件保存在本机。</small></div><p>备份包含故事、照片、角色、技能和陪伴偏好。恢复后需重新设置模型连接和 MCP 服务，并重新确认联网授权。</p><div class="release-data-actions"><button :disabled="busy" @click="exportData">导出我的故事</button><button class="release-danger" :disabled="busy" @click="deleteData">{{ offline?'清空本地数据':'删除账号与故事' }}</button><button v-if="!offline" @click="signOut">退出登录</button></div></div></fieldset><p v-if="error" class="release-error" role="alert">{{ error }}</p><p v-else-if="accountNotice" class="release-setting-notice" role="status">{{ accountNotice }}</p></section></div>
+    <div v-if="showRoleForm" class="release-modal-backdrop" @click.self="showRoleForm=false"><form class="release-modal" role="dialog" aria-modal="true" :aria-label="roleForm.id ? '编辑角色' : '创建角色'" @submit.prevent="saveRole"><header><h2>{{ roleForm.id?'编辑角色':'创建角色' }}</h2><button type="button" @click="showRoleForm=false" aria-label="关闭">×</button></header><label>名字<input v-model="roleForm.name" required maxlength="40"/></label><label>一句话介绍<input v-model="roleForm.profile" maxlength="500"/></label><label>人物背景<textarea v-model="roleForm.background" rows="4" maxlength="4000"/></label><label>性格与表达方式<textarea v-model="roleForm.personality" rows="3" maxlength="2000"/></label><label>第一句话<textarea v-model="roleForm.greeting" rows="2" maxlength="2000"/></label><p v-if="error" class="release-error">{{ error }}</p><button class="release-primary" :disabled="busy">保存角色</button><button v-if="roleForm.id" type="button" class="release-danger" @click="removeRole">删除角色</button></form></div>
+  </div>

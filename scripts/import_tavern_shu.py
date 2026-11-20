@@ -10,7 +10,7 @@ from pathlib import Path
 
 WORKSPACE = Path(__file__).resolve().parent.parent
 TAVERN_PATH = WORKSPACE / "data/raw/shu/天有四时.json"
-PERSONA_PATH = WORKSPACE / "backend/src/main/resources/personas/shu/persona_card.json"
+PERSONA_PATH = WORKSPACE / ".local/personal/personas/shu/persona_card.json"
 
 
 def clean(text: str) -> str:
